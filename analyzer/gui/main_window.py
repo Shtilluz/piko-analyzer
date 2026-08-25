@@ -130,10 +130,19 @@ class MainWindow(QMainWindow):
         # Checksum tab
         cs_wrapper = QWidget()
         cs_layout  = QVBoxLayout(cs_wrapper)
-        self._btn_run_cs       = QPushButton(tr("Run Checksum Analysis"))
-        self._checksum_label   = QLabel(tr("No data yet."))
+        self._btn_run_cs = QPushButton(tr("Run Checksum Analysis"))
+        self._btn_run_cs.setToolTip(
+            "Перебрать алгоритмы контрольных сумм (XOR, SUM8, CRC8, CRC8-MAXIM, ...)\n"
+            "для каждой позиции байта. Показывает байты, которые с высокой вероятностью\n"
+            "являются полем контрольной суммы. Требует накопленные пакеты."
+        )
+        self._checksum_label = QLabel(tr("No data yet."))
         self._checksum_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self._checksum_label.setWordWrap(True)
+        self._checksum_label.setToolTip(
+            "Результаты: алгоритм, позиция байта и процент совпадений.\n"
+            "Кандидат с ≥90% совпадений скорее всего является контрольной суммой."
+        )
         self._btn_run_cs.clicked.connect(self._run_checksum)
         cs_layout.addWidget(self._btn_run_cs)
         cs_layout.addWidget(self._checksum_label)
@@ -142,6 +151,35 @@ class MainWindow(QMainWindow):
 
         # Log tab — always visible, shows all events
         self._tabs.addTab(self._log_view, "Лог")
+
+        # Tooltips for tabs
+        self._tabs.setTabToolTip(0,
+            "Статистика по каждой позиции байта: распределение значений,\n"
+            "топ-10 значений, метка постоянства (CONSTANT / MOSTLY_CONSTANT / VARIABLE)."
+        )
+        self._tabs.setTabToolTip(1,
+            "Детальный анализ каждого отдельного бита: как часто бит равен 0 или 1,\n"
+            "как часто он меняется между пакетами (transition%). Помогает находить\n"
+            "флаги, адреса и поля данных."
+        )
+        self._tabs.setTabToolTip(2,
+            "Запись и сравнение действий контроллера.\n"
+            "Схема: 1) Сбор базовой линии (покой) → 2) Отметить действие → 3) Стоп.\n"
+            "Показывает какие байты изменились при выполнении действия."
+        )
+        self._tabs.setTabToolTip(3,
+            "Графики: топ пакетов по частоте, динамика значения байта во времени,\n"
+            "длина пакетов во времени, гистограмма распределения значений."
+        )
+        self._tabs.setTabToolTip(4,
+            "Поиск поля контрольной суммы методом перебора алгоритмов.\n"
+            "Нажмите кнопку после накопления пакетов."
+        )
+        self._tabs.setTabToolTip(5,
+            "Журнал всех событий приложения в реальном времени.\n"
+            "Цвета: серый=DEBUG, белый=INFO, оранжевый=WARNING, красный=ERROR.\n"
+            "Здесь видны ошибки подключения, проблемы парсинга и прочая диагностика."
+        )
 
         splitter.addWidget(right)
         splitter.setStretchFactor(1, 1)
@@ -164,10 +202,17 @@ class MainWindow(QMainWindow):
         row1.addWidget(self._lbl_port)
         self._port_combo = QComboBox()
         self._port_combo.setMinimumWidth(110)
+        self._port_combo.setToolTip(
+            "COM-порт, к которому подключена Arduino с прошивкой PIKO.\n"
+            "Windows: COMx  |  Linux: /dev/ttyUSBx  |  Mac: /dev/tty.usbserial-x"
+        )
         row1.addWidget(self._port_combo)
         self._btn_refresh = QPushButton("↺")
         self._btn_refresh.setFixedWidth(28)
-        self._btn_refresh.setToolTip("Обновить список портов")
+        self._btn_refresh.setToolTip(
+            "Обновить список доступных COM-портов.\n"
+            "Нажмите после подключения USB-кабеля Arduino."
+        )
         self._btn_refresh.clicked.connect(self._refresh_ports)
         row1.addWidget(self._btn_refresh)
         layout.addLayout(row1)
@@ -179,6 +224,10 @@ class MainWindow(QMainWindow):
         for b in ["9600", "57600", "115200", "230400", "500000", "1000000"]:
             self._baud_combo.addItem(b)
         self._baud_combo.setCurrentText(str(config.DEFAULT_BAUDRATE))
+        self._baud_combo.setToolTip(
+            "Скорость UART в бит/с. Должна совпадать с Serial.begin() в прошивке.\n"
+            "По умолчанию 115200. При несовпадении строки в логе будут выглядеть как мусор."
+        )
         row2.addWidget(self._baud_combo)
         layout.addLayout(row2)
 
@@ -186,6 +235,14 @@ class MainWindow(QMainWindow):
         self._btn_connect    = QPushButton(tr("Connect"))
         self._btn_disconnect = QPushButton(tr("Disconnect"))
         self._btn_disconnect.setEnabled(False)
+        self._btn_connect.setToolTip(
+            "Открыть соединение с Arduino и начать приём сырых данных.\n"
+            "Arduino должна быть подключена и прошита прошивкой PIKO."
+        )
+        self._btn_disconnect.setToolTip(
+            "Закрыть UART-соединение.\n"
+            "Все накопленные данные остаются в памяти."
+        )
         self._btn_connect.clicked.connect(self._connect)
         self._btn_disconnect.clicked.connect(self._disconnect)
         btn_row.addWidget(self._btn_connect)
@@ -194,6 +251,7 @@ class MainWindow(QMainWindow):
 
         self._lbl_conn_state = QLabel("⬤ Отключено")
         self._lbl_conn_state.setStyleSheet("color: #888;")
+        self._lbl_conn_state.setToolTip("Текущий статус соединения с Arduino")
         layout.addWidget(self._lbl_conn_state)
 
         return grp
@@ -206,6 +264,24 @@ class MainWindow(QMainWindow):
         self._lbl_unique   = QLabel("Уникальных: 0")
         self._lbl_duration = QLabel("Длительность: 00:00:00")
         self._lbl_dropped  = QLabel("Потеряно (Arduino): 0")
+
+        self._lbl_packets.setToolTip(
+            "Суммарное количество принятых пакетов, включая повторяющиеся.\n"
+            "Используется для расчёта процентного распределения."
+        )
+        self._lbl_unique.setToolTip(
+            "Количество структурно различных пакетов.\n"
+            "Одинаковые байтовые последовательности объединяются в одну запись."
+        )
+        self._lbl_duration.setToolTip(
+            "Время с момента нажатия кнопки «Подключить».\n"
+            "Можно использовать для расчёта частоты пакетов."
+        )
+        self._lbl_dropped.setToolTip(
+            "Количество фронтов сигнала, потерянных из-за переполнения\n"
+            "кольцевого буфера в Arduino. При больших значениях увеличьте\n"
+            "скорость UART или уменьшите нагрузку на линию."
+        )
 
         for lbl in (self._lbl_packets, self._lbl_unique,
                     self._lbl_duration, self._lbl_dropped):
@@ -222,6 +298,23 @@ class MainWindow(QMainWindow):
         self._lbl_raw_lines = QLabel("Строк Serial: 0")
         self._lbl_buf_size  = QLabel("Буфер фронтов: 0")
 
+        self._lbl_edges_ps.setToolTip(
+            "Количество фронтов сигнала (переходов 0→1 и 1→0) в секунду.\n"
+            "Пропорционально битрейту протокола PIKO SmartControl."
+        )
+        self._lbl_pkts_ps.setToolTip(
+            "Количество завершённых пакетов, распознанных парсером, в секунду.\n"
+            "0 при активных фронтах = парсер не находит границы пакетов."
+        )
+        self._lbl_raw_lines.setToolTip(
+            "Всего строк ASCII принято от Arduino с момента подключения.\n"
+            "Форматы: RAW:ts:dur:lvl  |  PKT:ts:HEX  |  STAT:rx:dropped"
+        )
+        self._lbl_buf_size.setToolTip(
+            "Текущее количество сырых фронтов в кольцевом буфере анализатора.\n"
+            "Используется для поиска паттернов пакетов."
+        )
+
         for lbl in (self._lbl_edges_ps, self._lbl_pkts_ps,
                     self._lbl_raw_lines, self._lbl_buf_size):
             layout.addWidget(lbl)
@@ -233,10 +326,20 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(grp)
 
         self._btn_raw_cap = QPushButton(tr("Start Raw Capture"))
+        self._btn_raw_cap.setToolTip(
+            "Отправить команду RAW на Arduino — начать передачу фронтов\n"
+            "с метками времени в µс. Каждая строка: RAW:ts:dur:lvl\n"
+            "где lvl=1 — нарастающий фронт, lvl=0 — спадающий."
+        )
         self._btn_raw_cap.clicked.connect(self._start_raw_capture)
         layout.addWidget(self._btn_raw_cap)
 
         self._btn_reset = QPushButton(tr("Reset Statistics"))
+        self._btn_reset.setToolTip(
+            "Сбросить все накопленные данные:\n"
+            "пакеты, счётчики, буфер фронтов, историю действий.\n"
+            "Также отправляет RST на Arduino (сброс счётчиков платы)."
+        )
         self._btn_reset.clicked.connect(self._reset_stats)
         layout.addWidget(self._btn_reset)
 

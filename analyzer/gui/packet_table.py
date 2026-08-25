@@ -39,12 +39,39 @@ class PacketTableWidget(QWidget):
 
     def retranslate_ui(self) -> None:
         self._header_lbl.setText(tr("<b>Unique Packets</b>"))
+        self._header_lbl.setToolTip(
+            "Каждая строка — уникальная байтовая последовательность.\n"
+            "Одинаковые пакеты объединяются и считаются. Сортировка по убыванию частоты."
+        )
         self._table.setHorizontalHeaderLabels([
             tr("Packet (hex)"),
             tr("Count"),
             "%",
             tr("Last seen (us)"),
         ])
+        # Tooltips on column headers
+        hdr = self._table.horizontalHeader()
+        hdr.setToolTip(
+            "Колонки: HEX-содержимое пакета | количество повторений | "
+            "доля от общего числа пакетов | метка времени последнего приёма в µс"
+        )
+        if self._table.horizontalHeaderItem(0):
+            self._table.horizontalHeaderItem(0).setToolTip(
+                "Содержимое пакета в шестнадцатеричном виде (пробелы между байтами)"
+            )
+        if self._table.horizontalHeaderItem(1):
+            self._table.horizontalHeaderItem(1).setToolTip(
+                "Сколько раз встречался этот пакет с начала захвата"
+            )
+        if self._table.horizontalHeaderItem(2):
+            self._table.horizontalHeaderItem(2).setToolTip(
+                "Доля этого пакета от всех принятых пакетов, в процентах"
+            )
+        if self._table.horizontalHeaderItem(3):
+            self._table.horizontalHeaderItem(3).setToolTip(
+                "Метка времени последнего приёма этого пакета в микросекундах (µс)\n"
+                "по внутренним часам Arduino (millis/micros)"
+            )
 
     def update_records(self, records: list[PacketRecord], total: int) -> None:
         self._table.setRowCount(len(records))

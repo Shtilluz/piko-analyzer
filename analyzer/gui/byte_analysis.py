@@ -39,6 +39,12 @@ class ByteAnalysisWidget(QWidget):
 
     def retranslate_ui(self) -> None:
         self._header_lbl.setText(tr("<b>Byte Analysis</b>"))
+        self._header_lbl.setToolTip(
+            "Анализ каждой позиции байта во всех принятых пакетах.\n"
+            "CONSTANT — байт не меняется (возможно: преамбула, адрес устройства).\n"
+            "MOSTLY_CONSTANT — меняется редко (≤10% пакетов).\n"
+            "VARIABLE — активно меняется (возможно: данные, счётчик, контрольная сумма)."
+        )
         for f in self._byte_frames:
             f.retranslate_ui()
 
@@ -85,6 +91,10 @@ class _ByteFrame(QFrame):
 
     def retranslate_ui(self) -> None:
         self._table.setHorizontalHeaderLabels([tr("Value"), tr("Count"), "%"])
+        self._table.setToolTip(
+            "Топ-10 значений для этой позиции байта, по убыванию частоты.\n"
+            "Value — значение в HEX  |  Count — количество вхождений  |  % — доля"
+        )
         if self._last_bs is not None:
             self.refresh(self._last_bs)
 
@@ -94,6 +104,17 @@ class _ByteFrame(QFrame):
         self._header.setText(
             f"BYTE {bs.position}   [{variability}]   "
             f"{bs.unique_count} {tr('unique values')} / {bs.total} {tr('total')}"
+        )
+        _variability_hints = {
+            "CONSTANT":        "Значение не меняется — вероятно преамбула или фиксированный адрес.",
+            "MOSTLY_CONSTANT": "Иногда меняется — возможно флаг режима или тип команды.",
+            "VARIABLE":        "Активно меняется — кандидат на данные, счётчик или контрольную сумму.",
+        }
+        hint = _variability_hints.get(bs.variability_label, "")
+        self._header.setToolTip(
+            f"Позиция байта {bs.position} в пакете (счёт с 0).\n"
+            f"Уникальных значений: {bs.unique_count}  из  {bs.total} пакетов.\n"
+            f"{hint}"
         )
 
         sorted_vals = sorted(

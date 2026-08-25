@@ -39,6 +39,11 @@ class BitAnalysisWidget(QWidget):
 
     def retranslate_ui(self) -> None:
         self._header_lbl.setText(tr("<b>Bit Analysis</b>"))
+        self._header_lbl.setToolTip(
+            "Анализ каждого бита в каждой позиции байта.\n"
+            "Помогает находить битовые флаги, поля направления и счётчики.\n"
+            "B7 — старший бит (MSB),  B0 — младший бит (LSB)."
+        )
         for f in self._frames:
             f.retranslate_ui()
 
@@ -88,6 +93,16 @@ class _BitFrame(QFrame):
         self._table.setVerticalHeaderLabels([tr("%0"), tr("%1"), tr("trans%")])
         bit_headers = [f"B{b}" for b in range(7, -1, -1)]
         self._table.setHorizontalHeaderLabels(bit_headers)
+        self._table.setToolTip(
+            "Строки:\n"
+            "  %0      — как часто бит равен 0 (в % от всех пакетов)\n"
+            "  %1      — как часто бит равен 1\n"
+            "  trans%  — как часто бит меняет значение между соседними пакетами\n\n"
+            "Подсказки интерпретации:\n"
+            "  %0≈100% или %1≈100%  →  константный бит (фиксированный флаг)\n"
+            "  trans%≈50%           →  активно меняющийся бит (данные, счётчик)\n"
+            "  trans% низкий        →  редко меняющийся (режим, адрес)"
+        )
         if self._last_bit_row:
             self.refresh(self._last_byte_pos, self._last_bit_row)
 
@@ -95,6 +110,10 @@ class _BitFrame(QFrame):
         self._last_byte_pos = byte_pos
         self._last_bit_row  = bit_row
         self._header.setText(f"BYTE {byte_pos} — {tr('bit detail')}")
+        self._header.setToolTip(
+            f"Побитовый анализ байта на позиции {byte_pos} (счёт с 0).\n"
+            "Каждый столбец — один бит. B7=MSB (старший), B0=LSB (младший)."
+        )
         for bit in range(8):
             col = 7 - bit
             bs  = bit_row[bit]

@@ -39,6 +39,10 @@ class ActionWidget(QWidget):
         self._lbl_label = QLabel()
         row1.addWidget(self._lbl_label)
         self._lbl_edit = QLineEdit()
+        self._lbl_edit.setToolTip(
+            "Название этой записи. Используйте понятные имена: speed_3, f0_on, reverse.\n"
+            "Для корреляционного анализа применяйте числовой суффикс: speed_0, speed_1, speed_2…"
+        )
         row1.addWidget(self._lbl_edit)
         rec_layout.addLayout(row1)
 
@@ -46,6 +50,10 @@ class ActionWidget(QWidget):
         self._lbl_note = QLabel()
         row2.addWidget(self._lbl_note)
         self._note_edit = QLineEdit()
+        self._note_edit.setToolTip(
+            "Необязательный комментарий: что именно вы делали на контроллере.\n"
+            "Сохраняется в сессии и помогает разобраться позже."
+        )
         row2.addWidget(self._note_edit)
         rec_layout.addLayout(row2)
 
@@ -54,6 +62,26 @@ class ActionWidget(QWidget):
         self._btn_action   = QPushButton()
         self._btn_stop     = QPushButton()
         self._btn_cancel   = QPushButton()
+
+        self._btn_baseline.setToolTip(
+            "ШАГ 1: Начать сбор базовой линии.\n"
+            "После нажатия — ничего НЕ делайте на контроллере 10–20 секунд.\n"
+            "Программа запоминает, как выглядят пакеты в состоянии покоя."
+        )
+        self._btn_action.setToolTip(
+            "ШАГ 2: Отметить момент выполнения действия.\n"
+            "Нажмите точно когда выполняете действие на контроллере\n"
+            "(нажатие кнопки, поворот ручки, смена режима и т.д.)."
+        )
+        self._btn_stop.setToolTip(
+            "ШАГ 3: Завершить запись и сохранить.\n"
+            "Программа сравнит доминирующие пакеты базовой линии и действия,\n"
+            "покажет какие байты изменились."
+        )
+        self._btn_cancel.setToolTip(
+            "Отменить текущую запись без сохранения.\n"
+            "Возвращает в режим ожидания."
+        )
 
         self._btn_baseline.clicked.connect(self._start_baseline)
         self._btn_action.clicked.connect(self._mark_action)
@@ -85,6 +113,11 @@ class ActionWidget(QWidget):
         self._history_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self._history_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self._history_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self._history_table.setToolTip(
+            "Список сохранённых записей действий.\n"
+            "Нажмите на строку, чтобы увидеть детальное сравнение пакетов ниже.\n"
+            "Колонки: метка | доминирующий пакет базы | доминирующий пакет действия | изменённые байты"
+        )
         self._history_table.selectionModel().selectionChanged.connect(
             self._on_history_select
         )
@@ -93,15 +126,31 @@ class ActionWidget(QWidget):
         self._diff_text = QTextEdit()
         self._diff_text.setReadOnly(True)
         self._diff_text.setMaximumHeight(200)
+        self._diff_text.setToolTip(
+            "Детальное сравнение для выбранной записи.\n"
+            "Показывает какие байты изменились и как (HEX + двоичный вид).\n"
+            "Символы ^ указывают позиции изменившихся битов."
+        )
         results_layout.addWidget(self._diff_text)
 
         self._btn_correlation = QPushButton()
+        self._btn_correlation.setToolTip(
+            "Корреляционный анализ: ищет байты/биты, значение которых\n"
+            "линейно коррелирует с числовым суффиксом метки действия.\n"
+            "Например, если вы записали speed_0, speed_1, speed_2, speed_3 —\n"
+            "находит байт, который кодирует скорость.\n"
+            "Требуется минимум 3 записи с числовыми суффиксами одного типа."
+        )
         self._btn_correlation.clicked.connect(self._run_correlation)
         results_layout.addWidget(self._btn_correlation)
 
         self._corr_text = QTextEdit()
         self._corr_text.setReadOnly(True)
         self._corr_text.setMaximumHeight(150)
+        self._corr_text.setToolTip(
+            "Результаты корреляционного анализа: кандидаты на поля данных\n"
+            "с указанием позиции байта, диапазона битов и степени уверенности."
+        )
         results_layout.addWidget(self._corr_text)
 
         splitter.addWidget(results_widget)

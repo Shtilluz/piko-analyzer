@@ -34,11 +34,19 @@ class ChartsWidget(QWidget):
 
         ctrl = QHBoxLayout()
         self._lbl_bytepos = QLabel()
+        self._lbl_bytepos.setToolTip(
+            "Выберите позицию байта для двух правых графиков:\n"
+            "«динамика значения во времени» и «гистограмма распределения»."
+        )
         ctrl.addWidget(self._lbl_bytepos)
         self._byte_spin = QSpinBox()
         self._byte_spin.setMinimum(0)
         self._byte_spin.setMaximum(31)
         self._byte_spin.setValue(0)
+        self._byte_spin.setToolTip(
+            "Номер байта в пакете (начиная с 0).\n"
+            "BYTE 0 — первый байт, BYTE 1 — второй и т.д."
+        )
         self._byte_spin.valueChanged.connect(self._on_byte_pos_changed)
         ctrl.addWidget(self._byte_spin)
         ctrl.addStretch()
@@ -46,6 +54,13 @@ class ChartsWidget(QWidget):
 
         self._fig = Figure(figsize=(8, 5), tight_layout=True)
         self._canvas = FigureCanvasQTAgg(self._fig)
+        self._canvas.setToolTip(
+            "Четыре графика:\n"
+            "  Верхний левый  — топ-10 пакетов по количеству (горизонтальные бары)\n"
+            "  Верхний правый — значение выбранного байта по последним N пакетам\n"
+            "  Нижний левый   — длина пакетов во времени (в байтах)\n"
+            "  Нижний правый  — гистограмма распределения значений выбранного байта"
+        )
         layout.addWidget(self._canvas)
 
         self._ax_freq  = self._fig.add_subplot(2, 2, 1)

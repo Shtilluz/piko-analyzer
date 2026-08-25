@@ -107,9 +107,34 @@ class LogViewWidget(QWidget):
 
     def retranslate_ui(self) -> None:
         self._lbl_filter.setText(tr("Log level:") if tr("Log level:") != "Log level:" else "Уровень:")
+        self._lbl_filter.setToolTip(
+            "Минимальный уровень сообщений для отображения.\n"
+            "DEBUG — всё (включая каждую принятую строку).\n"
+            "INFO  — основные события (подключение, пакеты).\n"
+            "WARNING — потенциальные проблемы.\n"
+            "ERROR — только ошибки."
+        )
+        self._level_combo.setToolTip(
+            "Фильтр уровня лога. Выберите уровень, начиная с которого\n"
+            "сообщения будут отображаться в этой панели.\n"
+            "Файл лога (data/piko_analyzer.log) всегда пишется на уровне DEBUG."
+        )
         self._btn_clear.setText("Очистить")
+        self._btn_clear.setToolTip(
+            "Очистить текст в этой панели.\n"
+            "Файл лога на диске не удаляется и продолжает пополняться."
+        )
         self._btn_copy.setText("Копировать")
+        self._btn_copy.setToolTip(
+            "Скопировать весь текст лога из этой панели в буфер обмена.\n"
+            "Удобно для вставки в баг-репорт или сохранения вручную."
+        )
         self._btn_open_file.setText("Открыть файл лога")
+        self._btn_open_file.setToolTip(
+            f"Открыть файл лога во внешнем текстовом редакторе.\n"
+            f"Путь: data/piko_analyzer.log\n"
+            f"Файл ротируется при достижении 2 МБ (хранится 3 резервных копии)."
+        )
         self._update_status()
 
     def _update_status(self) -> None:
