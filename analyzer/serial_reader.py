@@ -36,8 +36,12 @@ class SerialWorker(QObject):
     Emits signals for every event — the GUI only reacts to signals.
     """
 
-    edge_received   = Signal(RawEdge)
-    packet_received = Signal(int, bytes)    # (timestamp_us, data)
+    # NOTE: edge_received uses Signal(object) — NOT Signal(RawEdge).
+    # PySide6 cannot marshal a custom Python dataclass across a thread
+    # boundary in a queued connection if the type isn't registered with
+    # the Qt meta-object system. Signal(object) works for any Python value.
+    edge_received   = Signal(object)        # emits a RawEdge instance
+    packet_received = Signal(int, object)   # (timestamp_us, bytes)
     stat_received   = Signal(int, int)      # (total_rx, dropped)
     connected       = Signal(str)           # port name
     disconnected    = Signal(str)           # reason string
@@ -232,8 +236,8 @@ class SerialWorker(QObject):
 class SerialThread(QThread):
     """Wraps SerialWorker in a QThread. Exposes the same signals."""
 
-    edge_received   = Signal(RawEdge)
-    packet_received = Signal(int, bytes)
+    edge_received   = Signal(object)        # RawEdge
+    packet_received = Signal(int, object)   # (timestamp_us, bytes)
     stat_received   = Signal(int, int)
     connected       = Signal(str)
     disconnected    = Signal(str)

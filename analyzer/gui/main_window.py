@@ -62,6 +62,8 @@ class MainWindow(QMainWindow):
         self._edges_per_tick  = 0
         self._pkts_per_tick   = 0
         self._raw_lines_total = 0
+        self._last_edge_time  = 0.0   # monotonic, for stale-flush detection
+        self._no_pkts_warned  = False  # warn once when edges arrive but no packets
 
         self._build_ui()
         self._setup_refresh_timer()
@@ -472,12 +474,34 @@ class MainWindow(QMainWindow):
             log.error(f"Ошибка анализа: {exc}", exc_info=True)
 
     def _refresh_diag(self) -> None:
-        rate_e = int(self._edges_per_tick / (config.GUI_REFRESH_MS / 1000))
-        rate_p = int(self._pkts_per_tick  / (config.GUI_REFRESH_MS / 1000))
+        tick_s = config.GUI_REFRESH_MS / 1000
+        rate_e = int(self._edges_per_tick / tick_s)
+        rate_p = int(self._pkts_per_tick  / tick_s)
         self._lbl_edges_ps.setText(f"Фронтов/с: {rate_e:,}")
         self._lbl_pkts_ps.setText(f"Пакетов/с: {rate_p:,}")
         self._lbl_raw_lines.setText(f"Строк Serial: {self._raw_lines_total:,}")
         self._lbl_buf_size.setText(f"Буфер фронтов: {len(self._edge_buf):,}")
+
+        # Flush stale edges: if no new edge arrived for 2× GAP, flush accumulator
+        if self._last_edge_time > 0:
+            stale_s = (config.PACKET_GAP_US * 2) / 1_000_000
+            if (time.monotonic() - self._last_edge_time) > stale_s:
+                self._edge_accum.flush_now()
+                self._last_edge_time = 0.0
+
+        # Warn once when edges arrive but no packets decoded yet
+        total_edges = self._raw_lines_total
+        if (not self._no_pkts_warned
+                and total_edges > 200
+                and self._packet_stats.total_count == 0):
+            self._no_pkts_warned = True
+            log.warning(
+                f"Получено {total_edges} строк, но пакеты не распознаны. "
+                f"Проверьте: бодрейт, есть ли сигнал на D2, правильно ли "
+                f"подключён оптопар. Смотрите вкладку Лог."
+            )
+            self._set_status("⚠ Данные есть, пакеты не декодируются — смотрите Лог", timeout=6000)
+
         self._edges_per_tick = 0
         self._pkts_per_tick  = 0
 
@@ -588,17 +612,18 @@ class MainWindow(QMainWindow):
     def _on_raw_line(self, line: str) -> None:
         self._raw_lines_total += 1
 
-    @Slot(RawEdge)
-    def _on_edge(self, edge: RawEdge) -> None:
+    @Slot(object)   # Signal(object) — PySide6 cannot marshal custom dataclass cross-thread
+    def _on_edge(self, edge) -> None:
         self._edges_per_tick += 1
+        self._last_edge_time = time.monotonic()
         self._edge_buf.append(edge)
         try:
             self._edge_accum.feed(edge)
         except Exception as exc:
             log.error(f"EdgeAccumulator.feed() error: {exc}", exc_info=True)
 
-    @Slot(int, bytes)
-    def _on_pkt_line(self, timestamp_us: int, data: bytes) -> None:
+    @Slot(int, object)
+    def _on_pkt_line(self, timestamp_us: int, data) -> None:
         self._on_parsed_packet(timestamp_us, data, [])
 
     @Slot(int, int)

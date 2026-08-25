@@ -82,40 +82,76 @@ class EdgeAccumulator:
 
 def _edges_to_bytes(edges: list[RawEdge]) -> bytes:
     """
-    Attempt to decode a sequence of edges into bytes.
+    Heuristic conversion of a raw edge sequence into bytes.
 
-    This is an EXPLORATORY heuristic — results are hypotheses.
+    Since the protocol is unknown, this is EXPLORATORY — results are
+    hypotheses to be verified by experiment.
 
-    Algorithm:
-      1. Collect all pulse durations.
-      2. Find the median.  Durations < median are "short", >= are "long".
-      3. Map to bits: this mapping is UNKNOWN — we start by outputting
-         the raw duration histogram alongside the byte guess.
-      4. Return the guessed byte sequence (may be completely wrong).
+    Strategy:
+      1. Use all edges (don't filter aggressively — avoids empty output).
+      2. Quantize durations: short → 1, long → 0  (common NRZ convention).
+         The split point is the median of all durations.
+      3. Pack bits MSB-first into bytes.
+      4. If the edge group is too small for even 1 byte, encode the timing
+         fingerprint directly (duration values) so the packet table still
+         shows SOMETHING the user can compare across captures.
 
-    If fewer than 8 edges arrive, return empty bytes — not enough for a byte.
+    IMPORTANT: The byte values here may be completely wrong.
+    They become meaningful only after correlation experiments confirm
+    which bytes change when which actions are performed.
     """
-    durations = [e.duration_us for e in edges if e.duration_us >= config.MIN_PULSE_US]
-
-    if len(durations) < 8:
+    if not edges:
         return bytes()
 
-    median = sorted(durations)[len(durations) // 2]
+    # Include ALL edges (even very short ones) — filtering is too aggressive
+    # before we know the protocol's bit timing.
+    durations = [e.duration_us for e in edges]
+    levels    = [e.level       for e in edges]
+
+    # Remove zero-duration first edge (Arduino doesn't know duration at startup)
+    if durations and durations[0] == 0:
+        durations = durations[1:]
+        levels    = levels[1:]
+
+    if not durations:
+        return bytes()
+
+    n = len(durations)
+
+    if n < 8:
+        # Not enough edges for a proper byte decode.
+        # Return a compact timing fingerprint so the packet table fills up.
+        # Encode: [edge_count, median_dur_hi, median_dur_lo, level_mask]
+        median = sorted(durations)[n // 2]
+        lvl_byte = sum(1 << i for i, v in enumerate(levels[:8]) if v)
+        return bytes([
+            min(n, 255),
+            (median >> 8) & 0xFF,
+            median & 0xFF,
+            lvl_byte,
+        ])
+
+    sorted_durs = sorted(durations)
+    median = sorted_durs[n // 2]
     if median == 0:
-        return bytes()
+        median = 1
 
-    # Assign 0/1 based on whether duration is above or below median.
-    # Convention: short pulse → 1, long pulse → 0  (common in UART/NRZ,
-    # but may be reversed — we don't know yet).
+    # short pulse (< median) → bit 1,  long pulse (≥ median) → bit 0
     bits = [0 if d >= median else 1 for d in durations]
 
-    # Pack bits into bytes (MSB first — also unknown, just a starting guess)
+    # Pack bits into bytes, MSB first
     byte_list = []
     for i in range(0, len(bits) - 7, 8):
         byte_val = 0
         for b in range(8):
             byte_val = (byte_val << 1) | bits[i + b]
         byte_list.append(byte_val)
+
+    if not byte_list:
+        # Had >= 8 edges but all landed in the same timing bucket.
+        # Encode edge count + level pattern as fallback.
+        lvl_byte = sum(1 << i for i, v in enumerate(levels[:8]) if v)
+        return bytes([min(n, 255), lvl_byte])
 
     return bytes(byte_list)
 
