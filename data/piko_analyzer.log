@@ -1,0 +1,1 @@
+12:41:42.142 [DEBUG   ] piko.serial_reader — Available ports: ['/dev/ttyS0', '/dev/ttyS1', '/dev/ttyS2', '/dev/ttyS3']

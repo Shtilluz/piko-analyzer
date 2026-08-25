@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![PySide6](https://img.shields.io/badge/GUI-PySide6-green.svg)](https://doc.qt.io/qtforpython/)
-[![Tests](https://img.shields.io/badge/Tests-112%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-123%20passed-brightgreen.svg)](tests/)
 
 **Language / Язык:** [English](#english) · [Русский](#русский)
 
@@ -24,9 +24,11 @@ is undocumented. This tool helps reverse-engineer it experimentally:
 1. Capture raw electrical edges from the signal line.
 2. Group them into candidate packets by silence gaps.
 3. Build statistical profiles of every byte and bit position.
-4. Record labelled experiments ("Speed 1", "Speed 2", "F0 ON", …).
+4. Record labelled experiments ("speed 1", "speed 2", "switch 1 PLUS", …).
 5. Auto-correlate experiment results with byte/bit values.
-6. Run checksum candidates against all known algorithms.
+6. **Find control signals for switches, signals, relays** — automatically.
+7. Run checksum candidates against all known algorithms.
+8. Generate ready-to-flash Arduino sketches.
 
 **The tool never assumes a protocol format.** Results are always labelled
 as *candidates*, *possible*, or *confidence %* — never as facts until
@@ -82,9 +84,12 @@ PIKO SmartControl
 | **Bit analysis** | Per-bit 0/1 ratio and transition frequency |
 | **Transition tracker** | Tracks value→value changes between packets |
 | **Action recorder** | Baseline vs action diff with dominant packet comparison |
+| **Quick Labels** | One-click label presets for switches, signals, relays, loco |
 | **Correlation** | Pearson r between labelled numeric values and bit fields |
+| **Signal Finder** | Universal detector for address + direction fields of any device type |
 | **Checksum finder** | Tests XOR, SUM, CRC-8 and variants across all byte positions |
 | **Charts** | Frequency, byte-over-time, length, distribution plots |
+| **Sketch Generator** | Arduino .ino for locomotive OR switch/accessory decoder |
 | **Session save** | Full snapshot to JSON + CSV export |
 | **Bilingual UI** | English / Russian, live switch without restart |
 
@@ -117,7 +122,7 @@ pip install -r requirements.txt
 
 ```bash
 pytest tests/ -v
-# Expected: 112 passed
+# Expected: 123 passed
 ```
 
 #### 4. Flash the Arduino
@@ -148,22 +153,41 @@ python -m analyzer.main
 
 #### Step 2 — Record experiments
 
-Go to the **Actions** tab.
+Go to the **Actions** tab. Use the **Quick Labels** panel at the top to auto-fill
+label names — pick a profile preset, set the device number, and click **Auto-fill Label**.
 
-| What to record | Label convention |
-|----------------|-----------------|
+**Locomotive labels:**
+
+| What to record | Label |
+|----------------|--------|
 | Speed step 0 | `speed_0` |
-| Speed step 1 | `speed_1` |
 | Speed step 10 | `speed_10` |
-| Forward direction | `forward` |
-| Reverse direction | `reverse` |
+| Forward | `forward` |
 | Function 0 on | `f0_on` |
-| Function 0 off | `f0_off` |
+
+**Switch / Point labels:**
+
+| What to record | Label |
+|----------------|--------|
+| Switch 1 → PLUS | `sw_1_plus` |
+| Switch 1 → MINUS | `sw_1_minus` |
+| Switch 2 → PLUS | `sw_2_plus` |
+| Switch 2 → MINUS | `sw_2_minus` |
+
+**Signal / Semaphore labels:**
+
+| What to record | Label |
+|----------------|--------|
+| Signal 1 → Red | `sig_1_red` |
+| Signal 1 → Green | `sig_1_green` |
+| Signal 2 → Yellow | `sig_2_yellow` |
+
+**Relay labels:**  `relay_1_on`, `relay_1_off`, `relay_2_on`, …
 
 For each action:
 
 ```
-1. Type the label  →  click [1. Start Baseline]
+1. Type the label (or use Quick Labels)  →  click [1. Start Baseline]
 2. Wait 5 seconds without touching the controller
 3. Click [2. Action Now]  →  immediately perform the action on the controller
 4. Click [3. Stop & Save]
@@ -172,12 +196,37 @@ For each action:
 The tool records the **dominant packet** before and after, and shows the diff:
 
 ```
-BYTE 2:  03 (00000011)  →  13 (00010011)
-                              ^
-                         bit 4 changed
+BYTE 2:  03 (00000011)  →  0B (00001011)
+                                ^
+                           bit 3 changed
 ```
 
-#### Step 3 — Correlation
+#### Step 3 — Find Switch / Accessory Signals
+
+Open the **Signal Finder** tab (between Actions and Charts).
+
+1. Select the profile type from the dropdown — or leave **Auto-detect**.
+2. Click **Analyze** (or it runs automatically when ≥ 4 matching records exist).
+3. The tool finds:
+   - **Direction field** — the bit(s) that flip between PLUS and MINUS for the same switch
+   - **Address field** — the bit range whose value correlates with the switch number
+4. Results show confidence % (green ≥ 80%, yellow ≥ 50%):
+
+```
+Discovered fields
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Name        Byte   Bits    Confidence  Note
+direction   1      b3      100%        flips in 4/4 pairs
+address     0      b3:b0   98%         Pearson r=0.983 (n=4)
+```
+
+5. Click **Export to Sketch Generator** — the Switch/Accessory tab is pre-filled automatically.
+
+**Minimum requirements for the Signal Finder:**
+- Direction field: ≥ 2 addresses with both PLUS and MINUS recorded
+- Address field: ≥ 3 distinct address numbers recorded (any state)
+
+#### Step 4 — Correlation (Locomotive)
 
 After recording at least **3 numeric experiments** (e.g. `speed_0` … `speed_5`):
 
@@ -194,7 +243,7 @@ A confidence above 95% with 5+ experiments is strong evidence.
 **Verify by predicting: if speed_7 should give BYTE 2 = 0x73, send speed_7
 and check.**
 
-#### Step 4 — Checksum
+#### Step 5 — Checksum
 
 Click the **Checksum** tab → **Run Checksum Analysis**.
 
@@ -206,15 +255,39 @@ Checksum Candidates
 Algorithm   Byte pos   Match %
 xor         4          100.0%   ← strong candidate
 sum8        4           12.3%
-crc8        4            8.1%
 ```
 
 100% match = that byte IS the checksum of the remaining bytes with that algorithm.
 
-#### Step 5 — Save and export
+#### Step 6 — Generate Sketch
+
+Open the **Sketch Generator** tab.
+
+- **Locomotive tab**: fill in speed byte, direction bit, functions, checksum → Generate Sketch.
+- **Switch / Accessory tab**: fill in address byte/mask, direction bit, polarity → Generate Switch Sketch.
+  - Or use **Export from Signal Finder** to auto-fill all fields.
+
+The generated C++ sketch contains `throwSwitch(address, plus)` or `setSpeed(s)` functions ready for your bus driver.
+
+#### Step 7 — Save and export
 
 - **File → Save Session** — saves complete analysis to `data/sessions/session_YYYYMMDD_HHMMSS.json`.
 - **File → Export CSV** — exports the unique packet table as CSV.
+
+---
+
+### Signal Profile Naming Conventions
+
+The Signal Finder recognises these built-in label patterns:
+
+| Profile | Pattern | Example labels |
+|---------|---------|----------------|
+| Switch / Point | `sw_N_plus`, `sw_N_minus` | `sw_1_plus`, `sw_3_minus` |
+| Railway Signal | `sig_N_red`, `sig_N_green`, `sig_N_yellow` | `sig_2_green` |
+| Relay | `relay_N_on`, `relay_N_off` | `relay_1_on` |
+| Locomotive | `speed_N`, `fM_on/off`, `forward`, `reverse` | `speed_5`, `f0_on` |
+
+`N` is the device address number (integer). Use consistent numbering across plus/minus pairs.
 
 ---
 
@@ -240,10 +313,6 @@ STOP   pause output (ISR still runs, ring buffer fills)
 RST    reset counters and clear ring buffer
 ```
 
-**Why text protocol?**
-Binary would be faster, but a text protocol lets you open a plain Serial
-Monitor and verify the hardware is working before running the full analyzer.
-
 ---
 
 ### Architecture
@@ -262,13 +331,17 @@ Monitor and verify the hardware is working before running the full analyzer.
 │  │PacketStats │  │Transition    │  │ActionRecorder     │  │
 │  │(unique map)│  │Tracker       │  │(baseline/action   │  │
 │  └────────────┘  └──────────────┘  │ window + diff)    │  │
-│         │               │          └───────────────────┘  │
+│         │               │          └─────────┬─────────┘  │
 │         ▼               ▼                    │             │
-│  ┌────────────────────────────────────────────────────┐    │
-│  │              GUI  (PySide6,  ~7 fps refresh)       │    │
-│  │  PacketTable │ ByteAnalysis │ BitAnalysis │ Charts  │    │
-│  │  ActionView  │ ChecksumTab  │ Correlation           │    │
-│  └────────────────────────────────────────────────────┘    │
+│                                    signal_profiles.py      │
+│                                    (profile analysis)      │
+│                                              │             │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │              GUI  (PySide6,  ~7 fps refresh)        │   │
+│  │  PacketTable │ ByteAnalysis │ BitAnalysis │ Charts   │   │
+│  │  ActionView  │ SignalFinder │ Checksum               │   │
+│  │  SketchGenerator (Loco + Switch tabs)               │   │
+│  └─────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -277,11 +350,10 @@ Monitor and verify the hardware is working before running the full analyzer.
 - Serial I/O runs in its own `QThread` — the GUI never blocks on serial reads.
 - Analysis runs in the main thread, triggered by a `QTimer` at ~7 fps —
   packets can arrive at any rate without dropping GUI frames.
+- `signal_profiles.py` is a pure analysis module (no Qt) — extensible by adding
+  new `ProfileDefinition` entries to `BUILTIN_PROFILES` without any GUI changes.
 - `EdgeAccumulator` uses a silence-gap heuristic to detect packet boundaries.
-  This heuristic may be wrong for some protocols — in that case, examine raw
-  edge durations in the Charts tab and adjust `PACKET_GAP_US` in `config.py`.
-- Statistics are weighted by packet count, so a packet seen 1000 times
-  contributes proportionally to byte/bit histograms.
+  Adjust `PACKET_GAP_US` in `config.py` if needed.
 
 ---
 
@@ -341,47 +413,51 @@ runs all tests, and attaches `PIKO_Analyzer_Windows.zip` to the GitHub Release.
 piko-analyzer/
 ├── arduino/
 │   └── piko_sniffer/
-│       └── piko_sniffer.ino      Arduino firmware (raw edge capture)
+│       └── piko_sniffer.ino        Arduino firmware (raw edge capture)
 │
 ├── analyzer/
-│   ├── config.py                 All tunable parameters
-│   ├── models.py                 Pure data classes (no logic)
-│   ├── i18n.py                   Translation system (EN / RU)
-│   ├── serial_reader.py          QThread serial worker
-│   ├── packet_parser.py          Edge → packet heuristic + ring buffer
-│   ├── statistics.py             Unique packet statistics
-│   ├── bit_analysis.py           Byte / bit statistics
-│   ├── transition_analysis.py    Value transition tracking
-│   ├── checksum_analysis.py      Checksum candidate search
-│   ├── correlation.py            Pearson correlation finder
-│   ├── action_recorder.py        Experiment workflow + JSON persistence
-│   ├── session.py                Save / load / CSV export
+│   ├── config.py                   All tunable parameters
+│   ├── models.py                   Pure data classes (no logic)
+│   ├── i18n.py                     Translation system (EN / RU)
+│   ├── serial_reader.py            QThread serial worker
+│   ├── packet_parser.py            Edge → packet heuristic + ring buffer
+│   ├── statistics.py               Unique packet statistics
+│   ├── bit_analysis.py             Byte / bit statistics
+│   ├── transition_analysis.py      Value transition tracking
+│   ├── checksum_analysis.py        Checksum candidate search
+│   ├── correlation.py              Pearson correlation finder
+│   ├── action_recorder.py          Experiment workflow + JSON persistence
+│   ├── signal_profiles.py          Universal signal finder (NEW)
+│   ├── session.py                  Save / load / CSV export
 │   └── gui/
-│       ├── main_window.py        Main window + menus
-│       ├── packet_table.py       Unique packets table
-│       ├── byte_analysis.py      Per-byte statistics panel
-│       ├── bit_analysis_view.py  Per-bit statistics panel
-│       ├── action_view.py        Action recording + diff + correlation
-│       └── charts.py             Matplotlib charts
+│       ├── main_window.py          Main window + menus
+│       ├── packet_table.py         Unique packets table
+│       ├── byte_analysis.py        Per-byte statistics panel
+│       ├── bit_analysis_view.py    Per-bit statistics panel
+│       ├── action_view.py          Action recording + Quick Labels + diff
+│       ├── signal_finder_view.py   Signal Finder tab (NEW)
+│       ├── charts.py               Matplotlib charts
+│       ├── sketch_generator.py     Arduino sketch: Locomotive + Switch tabs
+│       └── help_view.py            Embedded HTML guide
 │
-├── tests/                        112 unit tests (pytest)
+├── tests/                          123 unit tests (pytest)
 │
 ├── data/
-│   ├── sessions/                 Saved session JSON files
-│   └── actions.json              Recorded action experiments
+│   ├── sessions/                   Saved session JSON files
+│   └── actions.json                Recorded action experiments
 │
 ├── assets/
-│   └── version_info.txt          Windows version resource
+│   └── version_info.txt            Windows version resource
 │
 ├── .github/
 │   └── workflows/
-│       └── build.yml             GitHub Actions Windows build
+│       └── build.yml               GitHub Actions Windows build
 │
-├── piko_analyzer.spec            PyInstaller spec
-├── build.bat                     Windows build script
-├── build.sh                      Linux / macOS build script
+├── piko_analyzer.spec              PyInstaller spec
+├── build.bat                       Windows build script
+├── build.sh                        Linux / macOS build script
 ├── requirements.txt
-└── LICENSE                       MIT
+└── LICENSE                         MIT
 ```
 
 ---
@@ -389,9 +465,10 @@ piko-analyzer/
 ### Running Tests
 
 ```bash
-pytest tests/ -v                  # all 112 tests
-pytest tests/test_checksum.py -v  # specific module
-pytest tests/ -k "correlation"    # by keyword
+pytest tests/ -v                          # all tests
+pytest tests/test_signal_profiles.py -v  # signal finder only
+pytest tests/test_checksum.py -v         # checksum only
+pytest tests/ -k "correlation"           # by keyword
 ```
 
 ---
@@ -423,9 +500,11 @@ PIKO SmartControl — пульт управления моделями желе�
 1. Захватывать сырые фронты сигнала с точностью до микросекунды.
 2. Группировать их в пакеты по паузам между сигналами.
 3. Строить статистику по каждому байту и биту.
-4. Записывать размеченные эксперименты («Скорость 1», «Скорость 2», «F0 ВКЛ»…).
+4. Записывать размеченные эксперименты («Скорость 1», «Стрелка 1 PLUS»…).
 5. Автоматически искать корреляцию между экспериментами и битовыми полями.
-6. Проверять кандидатов на контрольную сумму (XOR, SUM, CRC-8 и варианты).
+6. **Находить сигналы управления стрелками, светофорами, реле** — автоматически.
+7. Проверять кандидатов на контрольную сумму.
+8. Генерировать готовый Arduino-скетч.
 
 **Инструмент никогда не предполагает формат протокола.**
 Все результаты помечены как *кандидат*, *возможно* или *уверенность %* —
@@ -493,16 +572,16 @@ pip install -r requirements.txt
 
 ```bash
 pytest tests/ -v
-# Ожидается: 112 passed
+# Ожидается: 123 passed
 ```
 
 #### 4. Прошить Arduino
 
 - Открыть `arduino/piko_sniffer/piko_sniffer.ino` в **Arduino IDE** (версия 2.x).
 - Плата: **Arduino Nano**.
-- Процессор: **ATmega328P** (или Old Bootloader, если прошивка не загружается).
+- Процессор: **ATmega328P** (или Old Bootloader).
 - Загрузить (Upload).
-- Открыть Serial Monitor при **115200 бод** — должна появиться строка `PIKO:READY:RAW`.
+- Serial Monitor при **115200 бод** — должна появиться строка `PIKO:READY:RAW`.
 
 #### 5. Запустить анализатор
 
@@ -522,98 +601,113 @@ python -m analyzer.main
 2. В программе: выбрать порт → **Подключить**.
 3. Не трогать контроллер PIKO 30–60 секунд.
 4. Таблица «Уникальные пакеты» должна стабилизироваться.
-5. Посмотреть вкладку **Анализ байтов** — выявить `ПОСТОЯННЫЙ` и `ПЕРЕМЕННЫЙ` байты.
+5. Смотреть вкладку **Анализ байтов** — выявить `ПОСТОЯННЫЙ` и `ПЕРЕМЕННЫЙ` байты.
 
 #### Этап 2 — Запись экспериментов
 
-Вкладка **Действия**.
+Вкладка **Действия**. Используйте панель **Быстрые метки** (вверху):
+выберите шаблон профиля, задайте номер устройства, нажмите **Заполнить метку**.
+
+**Метки для стрелок:**
 
 | Что записывать | Метка |
 |----------------|-------|
-| Скорость 0 | `speed_0` |
-| Скорость 1 | `speed_1` |
-| Скорость 10 | `speed_10` |
-| Вперёд | `forward` |
-| Назад | `reverse` |
-| F0 включить | `f0_on` |
-| F0 выключить | `f0_off` |
+| Стрелка 1 → PLUS | `sw_1_plus` |
+| Стрелка 1 → MINUS | `sw_1_minus` |
+| Стрелка 2 → PLUS | `sw_2_plus` |
+| Стрелка 2 → MINUS | `sw_2_minus` |
+
+**Метки для светофоров:**  `sig_1_red`, `sig_1_green`, `sig_2_yellow`, …
+
+**Метки для реле:**  `relay_1_on`, `relay_1_off`, `relay_2_on`, …
+
+**Метки для локомотива:**  `speed_0` … `speed_10`, `forward`, `reverse`, `f0_on`, …
 
 Для каждого действия:
 
 ```
-1. Ввести метку  →  нажать [1. Начать baseline]
+1. Ввести метку (или «Заполнить метку»)  →  нажать [1. Начать baseline]
 2. Подождать 5 секунд без касания контроллера
 3. Нажать [2. Выполнить действие]  →  сразу выполнить действие на контроллере
 4. Нажать [3. Стоп и сохранить]
 ```
 
-Программа показывает diff доминантных пакетов:
+#### Этап 3 — Поиск сигналов стрелок (Signal Finder)
+
+Откройте вкладку **Поиск сигналов** (между Действия и Графики).
+
+1. Выберите тип профиля в выпадающем списке — или оставьте **Авто-определение**.
+2. Нажмите **Анализировать** (или анализ запускается автоматически при ≥ 4 записях).
+3. Программа находит:
+   - **Поле направления** — бит(ы), которые меняются между PLUS и MINUS для одной стрелки
+   - **Поле адреса** — диапазон бит, значение которых коррелирует с номером стрелки
+4. Результаты с уверенностью (зелёный ≥ 80%, жёлтый ≥ 50%):
 
 ```
-BYTE 2:  03 (00000011)  →  13 (00010011)
-                              ^
-                         бит 4 изменился
+Найденные поля
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Название      Байт   Биты    Уверенность  Примечание
+направление   1      b3      100%         меняется в 4/4 парах
+адрес         0      b3:b0   98%          Pearson r=0.983 (n=4)
 ```
 
-#### Этап 3 — Корреляция
+5. Нажмите **Экспорт в генератор скетча** — вкладка «Стрелка/Аксессуар» заполняется автоматически.
+
+**Минимум для анализа:**
+- Поле направления: ≥ 2 разных стрелки с обоими состояниями (plus + minus)
+- Поле адреса: ≥ 3 разных номера стрелок
+
+#### Этап 4 — Корреляция (локомотив)
 
 После записи минимум **3 числовых экспериментов** (напр. `speed_0` … `speed_5`):
 
 - Нажать **Запустить анализ корреляции**.
-- Программа вычисляет коэффициент корреляции Пирсона между числовыми
-  значениями меток и каждым диапазоном бит в каждом байте.
+- Программа вычисляет коэффициент Пирсона между числовыми значениями меток и каждым диапазоном бит.
 
 ```
 Возможное поле SPEED  BYTE 2 [B4:B0]  уверенность=99.8%  r=0.998 (n=6)
 ```
 
-Уверенность выше 95% при 5+ экспериментах — весомое свидетельство.
-**Верификация: предскажи значение для speed_7, отправь команду, проверь.**
-
-#### Этап 4 — Контрольная сумма
+#### Этап 5 — Контрольная сумма
 
 Вкладка **Контрольная сумма** → **Запустить анализ КС**.
 
 ```
-Кандидаты контрольной суммы
+Кандидаты КС
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
-Алгоритм   Позиция байта   Совпадений %
-xor        4               100.0%   ← сильный кандидат
-sum8       4                12.3%
+Алгоритм   Позиция   Совп. %
+xor        4         100.0%   ← сильный кандидат
 ```
 
-100% совпадений = этот байт является контрольной суммой остальных байтов.
+#### Этап 6 — Генератор скетча
 
-#### Этап 5 — Сохранение
+Вкладка **Генератор скетча** содержит две вкладки:
 
-- **Файл → Сохранить сессию** — полный снимок в `data/sessions/session_YYYYMMDD_HHMMSS.json`.
-- **Файл → Экспорт CSV** — таблица уникальных пакетов в CSV.
+- **Локомотив** — скорость, направление, функции F0–F7, КС → кнопка «Сгенерировать».
+- **Стрелка / Аксессуар** — адрес стрелки, бит направления, полярность, КС → «Сгенерировать скетч стрелки».
+  - Используйте **Экспорт из Signal Finder** для автозаполнения полей.
+
+Сгенерированный скетч содержит функцию `throwSwitch(address, plus)` или `setSpeed(s)`.
+
+#### Этап 7 — Сохранение
+
+- **Файл → Сохранить сессию** — полный снимок в `data/sessions/`.
+- **Файл → Экспорт CSV** — таблица уникальных пакетов.
 
 ---
 
-### Сборка для Windows
+### Соглашение о метках профилей
 
-На Windows-машине:
+Signal Finder распознаёт следующие форматы:
 
-```bat
-git clone https://github.com/bigus400/piko-analyzer.git
-cd piko-analyzer
-build.bat
-```
+| Профиль | Шаблон | Примеры меток |
+|---------|--------|---------------|
+| Стрелка | `sw_N_plus`, `sw_N_minus` | `sw_1_plus`, `sw_3_minus` |
+| Светофор | `sig_N_red`, `sig_N_green`, `sig_N_yellow` | `sig_2_green` |
+| Реле | `relay_N_on`, `relay_N_off` | `relay_1_on` |
+| Локомотив | `speed_N`, `fM_on/off`, `forward`, `reverse` | `speed_5` |
 
-Скрипт создаёт виртуальное окружение, устанавливает зависимости,
-прогоняет тесты и собирает `dist\PIKO_Analyzer\PIKO_Analyzer.exe`.
-
-Готовый exe не требует установки Python.
-
-#### Автоматическая сборка через GitHub Actions
-
-```bash
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-CI собирает бинарник на Windows и прикрепляет архив к GitHub Release.
+`N` — целочисленный адрес устройства. Нумерация должна быть последовательной.
 
 ---
 
@@ -626,8 +720,28 @@ DEFAULT_BAUDRATE   = 115200   # скорость Serial
 PACKET_GAP_US      = 5_000    # пауза → граница пакета (мкс)
 MIN_PULSE_US       = 10       # игнорировать импульсы короче (мкс)
 GUI_REFRESH_MS     = 150      # обновление GUI (~7 кадров/с)
-MAX_UNIQUE_PACKETS = 10_000   # лимит уникальных пакетов в статистике
+MAX_UNIQUE_PACKETS = 10_000   # лимит уникальных пакетов
 ```
+
+---
+
+### Сборка для Windows
+
+```bat
+git clone https://github.com/bigus400/piko-analyzer.git
+cd piko-analyzer
+build.bat
+```
+
+Скрипт создаёт виртуальное окружение, устанавливает зависимости,
+прогоняет тесты и собирает `dist\PIKO_Analyzer\PIKO_Analyzer.exe`.
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+CI собирает бинарник на Windows и прикрепляет к GitHub Release.
 
 ---
 
@@ -637,12 +751,12 @@ MAX_UNIQUE_PACKETS = 10_000   # лимит уникальных пакетов �
 
 - Алгоритм определения границ пакетов (`EdgeAccumulator`) использует
   эвристику — паузу в сигнале. Если протокол использует другое
-  фреймирование, результаты будут неверными. В этом случае изучи
-  сырые длительности импульсов на вкладке **Графики**.
+  фреймирование, измени `PACKET_GAP_US` в `config.py`.
+- Signal Finder требует минимум 2 разных адреса для поля направления
+  и 3 разных адреса для поля адреса.
+- Уверенность 100% — весомое, но не абсолютное доказательство
+  (верифицируй предсказанием + проверкой).
 - Не доверяй корреляции при менее чем 3 точках данных.
-- 100% совпадение контрольной суммы — сильное, но не абсолютное
-  доказательство (может быть случайным совпадением на малой выборке).
-- Всегда верифицируй гипотезу предсказанием + проверкой.
 
 ---
 

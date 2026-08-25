@@ -241,7 +241,71 @@ _RU: dict[str, str] = {
     "Generated Arduino sketch:": "Сгенерированный Arduino скетч:",
     "Copy":                      "Копировать",
     "Save .ino":                 "Сохранить .ino",
-    "Save .ino":                 "Сохранить .ino",
+
+    # ---- Tabs ----
+    "Signal Finder":    "Поиск сигналов",
+
+    # ---- Signal Finder tab ----
+    "Profile:":         "Профиль:",
+    "Analyze":          "Анализировать",
+    "Auto-detect":      "Авто-определение",
+    "No profile matched": "Профиль не совпал",
+    "Matched records":  "Совпавших записей",
+    "Matched records: {n}": "Совпадений: {n}",
+    "Discovered fields": "Найденные поля",
+    "Warnings / missing data": "Предупреждения / пропущенные данные",
+    "Export to Sketch Generator": "Экспорт в генератор скетча",
+    "Label":            "Метка",
+    "Baseline pkt":     "Пакет baseline",
+    "Action pkt":       "Пакет действия",
+    "Name":             "Название",
+    "Byte":             "Байт",
+    "Bits":             "Биты",
+    "Confidence":       "Уверенность",
+    "Note":             "Примечание",
+
+    # ---- Signal Finder field names (from SignalField.name) ----
+    "direction":        "направление",
+    "address":          "адрес",
+    "state":            "состояние",
+
+    # ---- Signal Finder profile names ----
+    "Switch / Point":   "Стрелка / Разветвитель",
+    "Railway Signal":   "Светофор",
+    "Relay":            "Реле",
+    "Locomotive":       "Локомотив",
+
+    # ---- Signal Finder warnings ----
+    "Not enough paired experiments for direction field — "
+    "need ≥2 addresses with both states, got {n}":
+        "Недостаточно парных экспериментов для поля направления (нужно ≥2 адреса)",
+    "Need ≥3 distinct addresses for address field — got {n}":
+        "Нужно ≥3 адресов для поля адреса",
+    "No records match pattern {pat}": "Нет записей, совпадающих с шаблоном {pat}",
+
+    # ---- Quick Labels (action_view) ----
+    "Quick Labels":       "Быстрые метки",
+    "Profile preset:":    "Шаблон профиля:",
+    "Device N:":          "Номер устройства:",
+    "Auto-fill Label":    "Заполнить метку",
+    "Custom":             "Произвольный",
+    "Switch sw_N_plus":   "Стрелка sw_N_plus",
+    "Switch sw_N_minus":  "Стрелка sw_N_minus",
+    "Signal sig_N_red":   "Светофор sig_N_red",
+    "Signal sig_N_green": "Светофор sig_N_green",
+    "Signal sig_N_yellow":"Светофор sig_N_yellow",
+    "Relay relay_N_on":   "Реле relay_N_on",
+    "Relay relay_N_off":  "Реле relay_N_off",
+    "Loco speed_N":       "Лок. speed_N",
+
+    # ---- Sketch Generator — Switch / Accessory tab ----
+    "Locomotive":              "Локомотив",
+    "Switch / Accessory":      "Стрелка / Аксессуар",
+    "Switch Address":          "Адрес стрелки",
+    "Address bitmask (hex):":  "Маска адреса (hex):",
+    "Switch Direction":        "Направление стрелки",
+    "PLUS=1 (plus is bit=1):": "PLUS=1 (положение plus = бит=1):",
+    "Generate Switch Sketch":  "Сгенерировать скетч стрелки",
 }
 
 _TRANSLATIONS: dict[str, dict[str, str]] = {

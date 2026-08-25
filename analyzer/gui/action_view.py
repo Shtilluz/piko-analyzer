@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QTextEdit, QGroupBox, QTableWidget,
     QTableWidgetItem, QHeaderView, QSplitter,
+    QComboBox, QSpinBox,
 )
 
 from analyzer.i18n            import tr, on_language_changed
@@ -30,6 +31,34 @@ class ActionWidget(QWidget):
 
         splitter = QSplitter(Qt.Vertical)
         layout.addWidget(splitter)
+
+        # ---- Quick Labels panel ----
+        self._quick_group = QGroupBox()
+        quick_layout = QHBoxLayout(self._quick_group)
+        quick_layout.setContentsMargins(6, 4, 6, 4)
+
+        self._lbl_preset = QLabel()
+        quick_layout.addWidget(self._lbl_preset)
+
+        self._preset_combo = QComboBox()
+        self._preset_combo.setMinimumWidth(180)
+        quick_layout.addWidget(self._preset_combo)
+
+        self._lbl_device_n = QLabel()
+        quick_layout.addWidget(self._lbl_device_n)
+
+        self._device_spin = QSpinBox()
+        self._device_spin.setRange(1, 99)
+        self._device_spin.setValue(1)
+        self._device_spin.setFixedWidth(55)
+        quick_layout.addWidget(self._device_spin)
+
+        self._btn_autofill = QPushButton()
+        self._btn_autofill.clicked.connect(self._autofill_label)
+        quick_layout.addWidget(self._btn_autofill)
+        quick_layout.addStretch()
+
+        splitter.addWidget(self._quick_group)
 
         # ---- Recording panel ----
         self._rec_group = QGroupBox()
@@ -160,6 +189,12 @@ class ActionWidget(QWidget):
     # ---- Retranslation ----
 
     def retranslate_ui(self) -> None:
+        self._quick_group.setTitle(tr("Quick Labels"))
+        self._lbl_preset.setText(tr("Profile preset:"))
+        self._lbl_device_n.setText(tr("Device N:"))
+        self._btn_autofill.setText(tr("Auto-fill Label"))
+        self._populate_preset_combo()
+
         self._rec_group.setTitle(tr("Record Action"))
         self._lbl_label.setText(tr("Label:"))
         self._lbl_edit.setPlaceholderText(tr("e.g.  speed_3  or  f0_on"))
@@ -181,6 +216,40 @@ class ActionWidget(QWidget):
         self._update_state_label()
         # Refresh history table headers only (data stays)
         self.refresh()
+
+    # ---- Quick Labels helpers ----
+
+    _PRESETS = [
+        ("Custom",                None),
+        ("Switch sw_N_plus",      "sw_{n}_plus"),
+        ("Switch sw_N_minus",     "sw_{n}_minus"),
+        ("Signal sig_N_red",      "sig_{n}_red"),
+        ("Signal sig_N_green",    "sig_{n}_green"),
+        ("Signal sig_N_yellow",   "sig_{n}_yellow"),
+        ("Relay relay_N_on",      "relay_{n}_on"),
+        ("Relay relay_N_off",     "relay_{n}_off"),
+        ("Loco speed_N",          "speed_{n}"),
+    ]
+
+    def _populate_preset_combo(self) -> None:
+        current = self._preset_combo.currentIndex()
+        self._preset_combo.blockSignals(True)
+        self._preset_combo.clear()
+        for label, _ in self._PRESETS:
+            self._preset_combo.addItem(tr(label))
+        self._preset_combo.blockSignals(False)
+        idx = max(0, min(current, len(self._PRESETS) - 1))
+        self._preset_combo.setCurrentIndex(idx)
+
+    def _autofill_label(self) -> None:
+        idx = self._preset_combo.currentIndex()
+        if idx < 0 or idx >= len(self._PRESETS):
+            return
+        template = self._PRESETS[idx][1]
+        if template is None:
+            return
+        n = self._device_spin.value()
+        self._lbl_edit.setText(template.format(n=n))
 
     def _update_state_label(self) -> None:
         state = self._rec.state

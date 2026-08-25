@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QGroupBox, QFormLayout, QLabel, QSpinBox, QComboBox,
     QCheckBox, QPushButton, QPlainTextEdit, QTableWidget,
     QTableWidgetItem, QHeaderView, QFileDialog, QApplication,
-    QLineEdit,
+    QLineEdit, QTabWidget,
 )
 
 from analyzer.i18n import tr, on_language_changed
@@ -202,7 +202,14 @@ class SketchGeneratorWidget(QWidget):
         form_layout.addWidget(self._btn_generate)
         form_layout.addStretch()
 
-        splitter.addWidget(scroll)
+        # ---- Mode tabs: Locomotive + Switch/Accessory ----
+        self._mode_tabs = QTabWidget()
+        self._mode_tabs.addTab(scroll, "")          # text set in retranslate_ui
+
+        sw_scroll = self._build_switch_form()
+        self._mode_tabs.addTab(sw_scroll, "")       # text set in retranslate_ui
+
+        splitter.addWidget(self._mode_tabs)
 
         # ---- Bottom: code output ----
         code_widget = QWidget()
@@ -282,13 +289,245 @@ class SketchGeneratorWidget(QWidget):
         self._btn_copy.setText(tr("Copy"))
         self._btn_save.setText(tr("Save .ino"))
 
+        self._mode_tabs.setTabText(0, tr("Locomotive"))
+        self._mode_tabs.setTabText(1, tr("Switch / Accessory"))
+
+        # Switch form labels
+        self._sw_grp_pkt.setTitle(tr("Packet"))
+        self._sw_lbl_pkt_len.setText(tr("Packet length (bytes):"))
+        self._sw_grp_addr.setTitle(tr("Switch Address"))
+        self._sw_lbl_addr_pos.setText(tr("Byte position:"))
+        self._sw_lbl_addr_mask.setText(tr("Address bitmask (hex):"))
+        self._sw_grp_dir.setTitle(tr("Switch Direction"))
+        self._sw_lbl_dir_pos.setText(tr("Byte position:"))
+        self._sw_lbl_dir_bit.setText(tr("Bit number (0=LSB):"))
+        self._sw_lbl_polarity.setText(tr("PLUS=1 (plus is bit=1):"))
+        self._sw_grp_cs.setTitle(tr("Checksum"))
+        self._sw_lbl_cs_algo.setText(tr("Algorithm:"))
+        self._sw_lbl_cs_pos.setText(tr("Byte position:"))
+        self._sw_btn_generate.setText(tr("Generate Switch Sketch"))
+
     # ================================================================ #
     # Code generation                                                    #
     # ================================================================ #
 
+    def _build_switch_form(self) -> QScrollArea:
+        """Build the Switch/Accessory parameter form and return its QScrollArea."""
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        form_widget = QWidget()
+        form_layout = QVBoxLayout(form_widget)
+        form_layout.setContentsMargins(8, 8, 8, 8)
+        form_layout.setSpacing(8)
+        scroll.setWidget(form_widget)
+
+        # Packet length
+        self._sw_grp_pkt = QGroupBox()
+        fl = QFormLayout(self._sw_grp_pkt)
+        self._sw_spin_pkt_len = QSpinBox()
+        self._sw_spin_pkt_len.setRange(1, 32)
+        self._sw_spin_pkt_len.setValue(4)
+        self._sw_lbl_pkt_len = QLabel()
+        fl.addRow(self._sw_lbl_pkt_len, self._sw_spin_pkt_len)
+        form_layout.addWidget(self._sw_grp_pkt)
+
+        # Switch address
+        self._sw_grp_addr = QGroupBox()
+        fl2 = QFormLayout(self._sw_grp_addr)
+        self._sw_spin_addr_pos = QSpinBox()
+        self._sw_spin_addr_pos.setRange(0, 31)
+        self._sw_spin_addr_pos.setValue(0)
+        self._sw_spin_addr_pos.setToolTip(
+            "Позиция байта, содержащего адрес стрелки (с 0).\n"
+            "Ищите поле, значение которого меняется при переключении\n"
+            "между разными стрелками и найдено в 'Адрес' Signal Finder."
+        )
+        self._sw_edit_addr_mask = QLineEdit("0x0F")
+        self._sw_edit_addr_mask.setToolTip(
+            "Битовая маска адреса в hex (например 0x0F = 4 бит = адреса 0–15).\n"
+            "Определяется диапазоном бит из Signal Finder."
+        )
+        self._sw_lbl_addr_pos  = QLabel()
+        self._sw_lbl_addr_mask = QLabel()
+        fl2.addRow(self._sw_lbl_addr_pos,  self._sw_spin_addr_pos)
+        fl2.addRow(self._sw_lbl_addr_mask, self._sw_edit_addr_mask)
+        form_layout.addWidget(self._sw_grp_addr)
+
+        # Switch direction
+        self._sw_grp_dir = QGroupBox()
+        fl3 = QFormLayout(self._sw_grp_dir)
+        self._sw_spin_dir_pos = QSpinBox()
+        self._sw_spin_dir_pos.setRange(0, 31)
+        self._sw_spin_dir_pos.setValue(1)
+        self._sw_spin_dir_pos.setToolTip(
+            "Позиция байта, содержащего бит направления стрелки (с 0)."
+        )
+        self._sw_spin_dir_bit = QSpinBox()
+        self._sw_spin_dir_bit.setRange(0, 7)
+        self._sw_spin_dir_bit.setValue(3)
+        self._sw_spin_dir_bit.setToolTip(
+            "Номер бита направления: 0=LSB, 7=MSB.\n"
+            "Найден в колонке 'Направление' Signal Finder."
+        )
+        self._sw_combo_polarity = QComboBox()
+        self._sw_combo_polarity.addItems(["PLUS = bit 1", "PLUS = bit 0"])
+        self._sw_combo_polarity.setToolTip(
+            "PLUS = bit 1: бит=1 означает положение PLUS (по умолчанию).\n"
+            "PLUS = bit 0: бит=0 означает положение PLUS."
+        )
+        self._sw_lbl_dir_pos  = QLabel()
+        self._sw_lbl_dir_bit  = QLabel()
+        self._sw_lbl_polarity = QLabel()
+        fl3.addRow(self._sw_lbl_dir_pos,  self._sw_spin_dir_pos)
+        fl3.addRow(self._sw_lbl_dir_bit,  self._sw_spin_dir_bit)
+        fl3.addRow(self._sw_lbl_polarity, self._sw_combo_polarity)
+        form_layout.addWidget(self._sw_grp_dir)
+
+        # Checksum
+        self._sw_grp_cs = QGroupBox()
+        fl4 = QFormLayout(self._sw_grp_cs)
+        self._sw_combo_cs_algo = QComboBox()
+        self._sw_combo_cs_algo.addItems(_CS_ALGOS)
+        self._sw_spin_cs_pos = QSpinBox()
+        self._sw_spin_cs_pos.setRange(0, 31)
+        self._sw_spin_cs_pos.setValue(3)
+        self._sw_lbl_cs_algo = QLabel()
+        self._sw_lbl_cs_pos  = QLabel()
+        fl4.addRow(self._sw_lbl_cs_algo, self._sw_combo_cs_algo)
+        fl4.addRow(self._sw_lbl_cs_pos,  self._sw_spin_cs_pos)
+        form_layout.addWidget(self._sw_grp_cs)
+
+        # Generate button
+        self._sw_btn_generate = QPushButton()
+        self._sw_btn_generate.clicked.connect(self._generate_switch)
+        self._sw_btn_generate.setToolTip(
+            "Сгенерировать Arduino скетч для управления стрелкой/аксессуаром.\n"
+            "Скетч содержит функцию throwSwitch(address, plus)."
+        )
+        form_layout.addWidget(self._sw_btn_generate)
+        form_layout.addStretch()
+
+        return scroll
+
+    def prefill_switch(self, result: object) -> None:
+        """Pre-fill switch form from a ProfileAnalysisResult (from Signal Finder)."""
+        fields = getattr(result, "fields", [])
+        addr_fields = [f for f in fields if f.name == "address"]
+        dir_fields  = [f for f in fields if f.name == "direction"]
+
+        if addr_fields:
+            best = addr_fields[0]
+            self._sw_spin_addr_pos.setValue(best.byte_pos)
+            mask = sum(1 << b for b in range(best.bit_low, best.bit_high + 1))
+            self._sw_edit_addr_mask.setText(f"0x{mask:02X}")
+
+        if dir_fields:
+            best = dir_fields[0]
+            self._sw_spin_dir_pos.setValue(best.byte_pos)
+            self._sw_spin_dir_bit.setValue(best.bit_low)
+            self._sw_combo_polarity.setCurrentIndex(0)  # assume PLUS = bit 1
+
+        # Switch to the switch tab and auto-generate
+        self._mode_tabs.setCurrentIndex(1)
+        self._generate_switch()
+
     def _generate(self) -> None:
-        code = self._build_sketch()
-        self._code_edit.setPlainText(code)
+        if self._mode_tabs.currentIndex() == 1:
+            self._generate_switch()
+        else:
+            self._code_edit.setPlainText(self._build_sketch())
+
+    def _generate_switch(self) -> None:
+        self._code_edit.setPlainText(self._build_switch_sketch())
+
+    def _build_switch_sketch(self) -> str:
+        pkt_len   = self._sw_spin_pkt_len.value()
+        addr_pos  = self._sw_spin_addr_pos.value()
+        addr_mask = self._parse_hex(self._sw_edit_addr_mask.text(), 0x0F)
+        dir_pos   = self._sw_spin_dir_pos.value()
+        dir_bit   = self._sw_spin_dir_bit.value()
+        plus_is_1 = self._sw_combo_polarity.currentIndex() == 0
+        cs_algo   = self._sw_combo_cs_algo.currentText()
+        cs_pos    = self._sw_spin_cs_pos.value()
+
+        ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        cs_func = _gen_checksum_func(cs_algo, cs_pos)
+        cs_call = (
+            f"    g_pkt[{cs_pos}] = calcChecksum();"
+            if cs_algo != "None" else
+            "    // (no checksum)"
+        )
+
+        return f"""\
+// =============================================================
+// PIKO SmartControl Protocol Analyzer — Generated Sketch
+// Device type : Switch / Accessory Decoder
+// Generated   : {ts}
+// Tool        : https://github.com/Shtilluz/piko-analyzer
+// =============================================================
+// WARNING: This code is based on EXPERIMENTALLY DISCOVERED
+// packet structure. Verify all constants before operating
+// real hardware. Wrong packets may damage equipment.
+// =============================================================
+
+#include <Arduino.h>
+
+// ---- Discovered packet constants ----
+const uint8_t PKT_LEN      = {pkt_len};    // total packet length, bytes
+
+const uint8_t SW_ADDR_BYTE = {addr_pos};   // byte position of switch address
+const uint8_t SW_ADDR_MASK = 0x{addr_mask:02X};  // address bitmask
+
+const uint8_t SW_DIR_BYTE  = {dir_pos};   // byte position of direction bit
+const uint8_t SW_DIR_BIT   = {dir_bit};   // bit number (0=LSB)
+const bool    SW_PLUS_IS_1 = {'true' if plus_is_1 else 'false'};  // true: bit=1 means PLUS
+
+const uint8_t CS_POS       = {cs_pos};   // checksum byte position (algorithm: {cs_algo})
+
+// ---- Runtime packet buffer ----
+uint8_t g_pkt[PKT_LEN];
+
+void setup() {{
+    Serial.begin(115200);
+    memset(g_pkt, 0, PKT_LEN);
+    Serial.println("PIKO Switch Sketch ready.");
+}}
+
+// ---- Checksum ----
+{cs_func}
+
+// ---- Throw a switch to PLUS or MINUS position ----
+void throwSwitch(uint8_t address, bool plus) {{
+    memset(g_pkt, 0, PKT_LEN);
+
+    // Set address field
+    g_pkt[SW_ADDR_BYTE] = (g_pkt[SW_ADDR_BYTE] & ~SW_ADDR_MASK)
+                          | (address & SW_ADDR_MASK);
+
+    // Set direction bit
+    if (SW_PLUS_IS_1 ? plus : !plus)
+        g_pkt[SW_DIR_BYTE] |=  (1 << SW_DIR_BIT);
+    else
+        g_pkt[SW_DIR_BYTE] &= ~(1 << SW_DIR_BIT);
+
+    // Checksum
+{cs_call}
+
+    // === TODO: Replace Serial.write with your physical bus driver ===
+    Serial.write(g_pkt, PKT_LEN);
+}}
+
+// ---- Example loop ----
+void loop() {{
+    // Cycle through switches 1–4
+    for (uint8_t sw = 1; sw <= 4; sw++) {{
+        throwSwitch(sw, true);   // PLUS
+        delay(1000);
+        throwSwitch(sw, false);  // MINUS
+        delay(1000);
+    }}
+}}
+"""
 
     def _build_sketch(self) -> str:
         pkt_len    = self._spin_pkt_len.value()

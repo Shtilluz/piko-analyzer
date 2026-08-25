@@ -53,6 +53,8 @@ class ActionRecord:
     # Dominant packet in action window
     action_dominant:   Optional[bytes] = None
     timestamp:    int          = 0
+    # Optional profile tag (e.g. "switch", "signal", "relay", "locomotive")
+    profile_type: str          = ""
 
 
 @dataclass

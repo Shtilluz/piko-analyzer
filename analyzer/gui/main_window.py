@@ -28,14 +28,15 @@ from analyzer.checksum_analysis   import find_checksum_candidates
 from analyzer.bit_analysis        import compute_byte_stats, compute_bit_stats
 from analyzer.session             import SessionManager
 
-from analyzer.gui.packet_table      import PacketTableWidget
-from analyzer.gui.byte_analysis     import ByteAnalysisWidget
-from analyzer.gui.bit_analysis_view import BitAnalysisWidget
-from analyzer.gui.action_view       import ActionWidget
-from analyzer.gui.charts            import ChartsWidget
-from analyzer.gui.log_view          import LogViewWidget
-from analyzer.gui.sketch_generator  import SketchGeneratorWidget
-from analyzer.gui.help_view         import HelpViewWidget
+from analyzer.gui.packet_table       import PacketTableWidget
+from analyzer.gui.byte_analysis      import ByteAnalysisWidget
+from analyzer.gui.bit_analysis_view  import BitAnalysisWidget
+from analyzer.gui.action_view        import ActionWidget
+from analyzer.gui.signal_finder_view import SignalFinderWidget
+from analyzer.gui.charts             import ChartsWidget
+from analyzer.gui.log_view           import LogViewWidget
+from analyzer.gui.sketch_generator   import SketchGeneratorWidget
+from analyzer.gui.help_view          import HelpViewWidget
 
 log = get_logger(__name__)
 
@@ -120,18 +121,20 @@ class MainWindow(QMainWindow):
         self._tabs = QTabWidget()
         right_layout.addWidget(self._tabs, 3)
 
-        self._byte_view    = ByteAnalysisWidget()
-        self._bit_view     = BitAnalysisWidget()
-        self._action_view  = ActionWidget(self._action_rec)
-        self._charts_view  = ChartsWidget()
-        self._sketch_view  = SketchGeneratorWidget()
-        self._help_view    = HelpViewWidget()
-        self._log_view     = LogViewWidget()
+        self._byte_view          = ByteAnalysisWidget()
+        self._bit_view           = BitAnalysisWidget()
+        self._action_view        = ActionWidget(self._action_rec)
+        self._signal_finder_view = SignalFinderWidget()
+        self._charts_view        = ChartsWidget()
+        self._sketch_view        = SketchGeneratorWidget()
+        self._help_view          = HelpViewWidget()
+        self._log_view           = LogViewWidget()
 
-        self._tabs.addTab(self._byte_view,   tr("Byte Analysis"))
-        self._tabs.addTab(self._bit_view,    tr("Bit Analysis"))
-        self._tabs.addTab(self._action_view, tr("Actions"))
-        self._tabs.addTab(self._charts_view, tr("Charts"))
+        self._tabs.addTab(self._byte_view,           tr("Byte Analysis"))   # 0
+        self._tabs.addTab(self._bit_view,            tr("Bit Analysis"))    # 1
+        self._tabs.addTab(self._action_view,         tr("Actions"))         # 2
+        self._tabs.addTab(self._signal_finder_view,  tr("Signal Finder"))   # 3
+        self._tabs.addTab(self._charts_view,         tr("Charts"))          # 4
 
         # Checksum tab
         cs_wrapper = QWidget()
@@ -153,16 +156,15 @@ class MainWindow(QMainWindow):
         cs_layout.addWidget(self._btn_run_cs)
         cs_layout.addWidget(self._checksum_label)
         cs_layout.addStretch()
-        self._tabs.addTab(cs_wrapper, tr("Checksum"))
+        self._tabs.addTab(cs_wrapper,          tr("Checksum"))          # 5
+        self._tabs.addTab(self._sketch_view,   tr("Sketch Generator"))  # 6
+        self._tabs.addTab(self._help_view,     tr("Instructions"))      # 7
+        self._tabs.addTab(self._log_view,      "Лог")                   # 8
 
-        # Sketch generator tab
-        self._tabs.addTab(self._sketch_view, tr("Sketch Generator"))
-
-        # Help / Instructions tab
-        self._tabs.addTab(self._help_view, tr("Instructions"))
-
-        # Log tab — always last, shows all events
-        self._tabs.addTab(self._log_view, "Лог")
+        # Connect Signal Finder → Sketch Generator
+        self._signal_finder_view.export_requested.connect(
+            self._sketch_view.prefill_switch
+        )
 
         # Tooltips for tabs
         self._tabs.setTabToolTip(0,
@@ -180,23 +182,28 @@ class MainWindow(QMainWindow):
             "Показывает какие байты изменились при выполнении действия."
         )
         self._tabs.setTabToolTip(3,
+            "Автоматический поиск полей управления стрелками, светофорами, реле.\n"
+            "Анализирует записанные действия и находит поля адреса и направления.\n"
+            "Используйте «Быстрые метки» во вкладке Действия для записи sw_N_plus/minus."
+        )
+        self._tabs.setTabToolTip(4,
             "Графики: топ пакетов по частоте, динамика значения байта во времени,\n"
             "длина пакетов во времени, гистограмма распределения значений."
         )
-        self._tabs.setTabToolTip(4,
+        self._tabs.setTabToolTip(5,
             "Поиск поля контрольной суммы методом перебора алгоритмов.\n"
             "Нажмите кнопку после накопления пакетов."
         )
-        self._tabs.setTabToolTip(5,
-            "Генератор готового Arduino .ino скетча.\n"
-            "Заполните найденную структуру пакета (адрес, байт скорости,\n"
-            "бит направления, функции, КС) и нажмите «Сгенерировать»."
-        )
         self._tabs.setTabToolTip(6,
+            "Генератор готового Arduino .ino скетча.\n"
+            "Вкладки: Локомотив (скорость/направление/функции) и Стрелка/Аксессуар.\n"
+            "Используйте «Экспорт» из Signal Finder для автозаполнения полей стрелки."
+        )
+        self._tabs.setTabToolTip(7,
             "Встроенная инструкция: схема подключения, порядок работы,\n"
             "интерпретация результатов, устранение неполадок."
         )
-        self._tabs.setTabToolTip(7,
+        self._tabs.setTabToolTip(8,
             "Журнал всех событий приложения в реальном времени.\n"
             "Цвета: серый=DEBUG, белый=INFO, оранжевый=WARNING, красный=ERROR.\n"
             "Здесь видны ошибки подключения, проблемы парсинга и прочая диагностика."
@@ -410,16 +417,18 @@ class MainWindow(QMainWindow):
         self._tabs.setTabText(0, tr("Byte Analysis"))
         self._tabs.setTabText(1, tr("Bit Analysis"))
         self._tabs.setTabText(2, tr("Actions"))
-        self._tabs.setTabText(3, tr("Charts"))
-        self._tabs.setTabText(4, tr("Checksum"))
-        self._tabs.setTabText(5, tr("Sketch Generator"))
-        self._tabs.setTabText(6, tr("Instructions"))
+        self._tabs.setTabText(3, tr("Signal Finder"))
+        self._tabs.setTabText(4, tr("Charts"))
+        self._tabs.setTabText(5, tr("Checksum"))
+        self._tabs.setTabText(6, tr("Sketch Generator"))
+        self._tabs.setTabText(7, tr("Instructions"))
         self._btn_run_cs.setText(tr("Run Checksum Analysis"))
         self._build_menu()
         self._packet_table.retranslate_ui()
         self._byte_view.retranslate_ui()
         self._bit_view.retranslate_ui()
         self._action_view.retranslate_ui()
+        self._signal_finder_view.retranslate_ui()
         self._charts_view.retranslate_ui()
         self._sketch_view.retranslate_ui()
 
@@ -439,6 +448,7 @@ class MainWindow(QMainWindow):
             self._refresh_analysis()
             self._refresh_diag()
             self._action_view.refresh()
+            self._signal_finder_view.refresh(self._action_rec.records)
         except Exception as exc:
             log.error(f"GUI refresh error: {exc}", exc_info=True)
 
