@@ -29,6 +29,9 @@ dist/
 # Session data (user-generated, not tracked)
 data/sessions/*.json
 data/actions.json
+# But always keep the placeholder files so git tracks the empty dirs
+!data/.gitkeep
+!data/sessions/.gitkeep
 
 # Build log
 build_log.txt

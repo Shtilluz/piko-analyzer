@@ -108,9 +108,9 @@ exe = EXE(
     upx=True,
     console=False,          # no black console window on Windows
     disable_windowed_traceback=False,
-    # Windows-specific
-    icon=str(ROOT / "assets" / "icon.ico") if (ROOT / "assets" / "icon.ico").exists() else None,
-    version=str(ROOT / "assets" / "version_info.txt") if (ROOT / "assets" / "version_info.txt").exists() else None,
+    # Windows version info (only attached when the file exists and we are on Windows)
+    icon    = str(ROOT / "assets" / "icon.ico")          if (ROOT / "assets" / "icon.ico").exists()          else None,
+    version = str(ROOT / "assets" / "version_info.txt")  if (ROOT / "assets" / "version_info.txt").exists() and sys.platform == "win32" else None,
 )
 
 coll = COLLECT(
