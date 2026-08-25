@@ -2,17 +2,57 @@ name: Build Windows Executable
 
 on:
   push:
+    branches:
+      - main          # build on every push to main
     tags:
-      - "v*"          # trigger on version tags: v1.0, v1.2.3, etc.
-  workflow_dispatch:  # allow manual trigger from GitHub UI
+      - "v*"          # also build and publish a Release on version tags
+  pull_request:
+    branches:
+      - main          # build (tests only) on PRs targeting main
+  workflow_dispatch:  # manual trigger from the GitHub Actions UI
+    inputs:
+      publish_release:
+        description: "Create a GitHub Release with this build?"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
+  # ── Job 1: tests on Linux (fast, no GUI needed) ──────────────────────────
+  test-linux:
+    name: Tests (Linux / Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies (no GUI)
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyserial numpy pandas matplotlib pytest
+
+      - name: Run tests
+        run: pytest tests/ -v --tb=short
+
+  # ── Job 2: Windows build ─────────────────────────────────────────────────
+  build-windows:
+    name: Build Windows .exe
+    runs-on: windows-latest
+    needs: test-linux          # only build if tests pass
+
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -24,36 +64,44 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller
 
-      - name: Run tests
-        run: |
-          python -m pytest tests/ -v --tb=short
+      - name: Run tests (Windows)
+        run: python -m pytest tests/ -v --tb=short
 
       - name: Build with PyInstaller
-        run: |
-          pyinstaller piko_analyzer.spec --clean --noconfirm
+        run: pyinstaller piko_analyzer.spec --clean --noconfirm
 
-      - name: Verify executable exists
+      - name: Verify executable
         run: |
           if (!(Test-Path "dist\PIKO_Analyzer\PIKO_Analyzer.exe")) {
-            Write-Error "Executable not found"
+            Write-Error "Executable not found after build"
             exit 1
           }
-          Write-Host "Executable size: $((Get-Item 'dist\PIKO_Analyzer\PIKO_Analyzer.exe').Length / 1MB) MB"
+          $size = [math]::Round((Get-Item "dist\PIKO_Analyzer\PIKO_Analyzer.exe").Length / 1MB, 1)
+          Write-Host "PIKO_Analyzer.exe — $size MB"
 
       - name: Create ZIP archive
         run: |
-          Compress-Archive -Path "dist\PIKO_Analyzer\*" -DestinationPath "PIKO_Analyzer_Windows.zip"
+          $tag = "${{ github.ref_name }}"
+          if ($tag -notmatch '^v') { $tag = "dev" }
+          Compress-Archive -Path "dist\PIKO_Analyzer\*" `
+                           -DestinationPath "PIKO_Analyzer_Windows_${tag}.zip"
 
-      - name: Upload artifact
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: PIKO_Analyzer_Windows
-          path: PIKO_Analyzer_Windows.zip
+          # upload whichever zip was created
+          path: PIKO_Analyzer_Windows_*.zip
           retention-days: 30
 
-      - name: Create GitHub Release (on tag)
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Create GitHub Release
+        # publish a Release when:  a tag is pushed  OR  manual trigger with publish=true
+        if: |
+          startsWith(github.ref, 'refs/tags/v') ||
+          github.event.inputs.publish_release == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          files: PIKO_Analyzer_Windows.zip
+          tag_name: ${{ github.ref_name }}
+          name: "PIKO Analyzer ${{ github.ref_name }}"
           generate_release_notes: true
+          files: PIKO_Analyzer_Windows_*.zip
