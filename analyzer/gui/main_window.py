@@ -6,17 +6,18 @@ from __future__ import annotations
 
 import os
 import time
-from datetime import datetime
 
 from PySide6.QtCore    import Qt, QTimer, Slot
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QComboBox, QPushButton, QGroupBox, QTabWidget,
     QSplitter, QStatusBar, QFileDialog, QMessageBox,
 )
 
 from analyzer              import config
 from analyzer.i18n         import tr, set_language, on_language_changed, LANGUAGES
+from analyzer.logger       import get_logger, install_qt_handler
+from analyzer.version      import APP_NAME, VERSION, AUTHOR, REPO
 from analyzer.models       import RawEdge
 from analyzer.serial_reader import SerialThread, list_ports
 from analyzer.packet_parser import EdgeAccumulator, RingBuffer
@@ -32,13 +33,16 @@ from analyzer.gui.byte_analysis     import ByteAnalysisWidget
 from analyzer.gui.bit_analysis_view import BitAnalysisWidget
 from analyzer.gui.action_view       import ActionWidget
 from analyzer.gui.charts            import ChartsWidget
+from analyzer.gui.log_view          import LogViewWidget
+
+log = get_logger(__name__)
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(tr("PIKO SmartControl Protocol Analyzer"))
-        self.resize(1280, 800)
+        self.setWindowTitle(f"{APP_NAME} v{VERSION}")
+        self.resize(1280, 820)
 
         self._serial_thread: SerialThread | None = None
         self._packet_stats   = PacketStats()
@@ -52,11 +56,22 @@ class MainWindow(QMainWindow):
         self._checksum_cache: list = []
         self._ordered_pkts: list[bytes] = []
 
+        # Counters for live diagnostics
+        self._edges_per_tick  = 0
+        self._pkts_per_tick   = 0
+        self._raw_lines_total = 0
+
         self._build_ui()
         self._setup_refresh_timer()
         self._refresh_ports()
 
+        # Connect logger → log panel AFTER widget exists
+        install_qt_handler(self._log_view.append_record)
         on_language_changed(self._retranslate_ui)
+
+        log.info(f"Запуск {APP_NAME} v{VERSION} by {AUTHOR}")
+        log.info(f"Репозиторий: {REPO}")
+        log.info(f"Лог файл: {os.path.abspath('data/piko_analyzer.log')}")
 
     # ================================================================ #
     # UI construction                                                    #
@@ -71,22 +86,26 @@ class MainWindow(QMainWindow):
         splitter = QSplitter(Qt.Horizontal)
         root.addWidget(splitter)
 
+        # ---- Left panel ----
         left = QWidget()
-        left.setMinimumWidth(260)
-        left.setMaximumWidth(320)
+        left.setMinimumWidth(270)
+        left.setMaximumWidth(330)
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
 
         self._grp_serial  = self._build_serial_group()
         self._grp_stats   = self._build_stats_group()
+        self._grp_diag    = self._build_diag_group()
         self._grp_actions = self._build_actions_group()
 
         left_layout.addWidget(self._grp_serial)
         left_layout.addWidget(self._grp_stats)
+        left_layout.addWidget(self._grp_diag)
         left_layout.addWidget(self._grp_actions)
         left_layout.addStretch()
         splitter.addWidget(left)
 
+        # ---- Right panel ----
         right = QWidget()
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(4, 0, 0, 0)
@@ -101,6 +120,7 @@ class MainWindow(QMainWindow):
         self._bit_view    = BitAnalysisWidget()
         self._action_view = ActionWidget(self._action_rec)
         self._charts_view = ChartsWidget()
+        self._log_view    = LogViewWidget()
 
         self._tabs.addTab(self._byte_view,   tr("Byte Analysis"))
         self._tabs.addTab(self._bit_view,    tr("Bit Analysis"))
@@ -108,23 +128,30 @@ class MainWindow(QMainWindow):
         self._tabs.addTab(self._charts_view, tr("Charts"))
 
         # Checksum tab
-        self._checksum_label = QLabel(tr("No data yet."))
-        self._checksum_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        self._checksum_label.setWordWrap(True)
         cs_wrapper = QWidget()
         cs_layout  = QVBoxLayout(cs_wrapper)
-        self._btn_run_cs = QPushButton(tr("Run Checksum Analysis"))
+        self._btn_run_cs       = QPushButton(tr("Run Checksum Analysis"))
+        self._checksum_label   = QLabel(tr("No data yet."))
+        self._checksum_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        self._checksum_label.setWordWrap(True)
         self._btn_run_cs.clicked.connect(self._run_checksum)
         cs_layout.addWidget(self._btn_run_cs)
         cs_layout.addWidget(self._checksum_label)
         cs_layout.addStretch()
         self._tabs.addTab(cs_wrapper, tr("Checksum"))
 
+        # Log tab — always visible, shows all events
+        self._tabs.addTab(self._log_view, "Лог")
+
         splitter.addWidget(right)
         splitter.setStretchFactor(1, 1)
 
-        self.setStatusBar(QStatusBar())
-        self.statusBar().showMessage(tr("Ready"))
+        # ---- Status bar ----
+        sb = QStatusBar()
+        self.setStatusBar(sb)
+        self._status_perm = QLabel()   # permanent right-side label
+        sb.addPermanentWidget(self._status_perm)
+        self._set_status("Готов", permanent=f"v{VERSION}")
 
         self._build_menu()
 
@@ -136,12 +163,13 @@ class MainWindow(QMainWindow):
         self._lbl_port = QLabel(tr("Port:"))
         row1.addWidget(self._lbl_port)
         self._port_combo = QComboBox()
-        self._port_combo.setMinimumWidth(100)
+        self._port_combo.setMinimumWidth(110)
         row1.addWidget(self._port_combo)
-        btn_refresh = QPushButton("↺")
-        btn_refresh.setFixedWidth(28)
-        btn_refresh.clicked.connect(self._refresh_ports)
-        row1.addWidget(btn_refresh)
+        self._btn_refresh = QPushButton("↺")
+        self._btn_refresh.setFixedWidth(28)
+        self._btn_refresh.setToolTip("Обновить список портов")
+        self._btn_refresh.clicked.connect(self._refresh_ports)
+        row1.addWidget(self._btn_refresh)
         layout.addLayout(row1)
 
         row2 = QHBoxLayout()
@@ -164,19 +192,38 @@ class MainWindow(QMainWindow):
         btn_row.addWidget(self._btn_disconnect)
         layout.addLayout(btn_row)
 
+        self._lbl_conn_state = QLabel("⬤ Отключено")
+        self._lbl_conn_state.setStyleSheet("color: #888;")
+        layout.addWidget(self._lbl_conn_state)
+
         return grp
 
     def _build_stats_group(self) -> QGroupBox:
         grp = QGroupBox(tr("Statistics"))
         layout = QVBoxLayout(grp)
 
-        self._lbl_packets  = QLabel(tr("Packets: 0"))
-        self._lbl_unique   = QLabel(tr("Unique: 0"))
-        self._lbl_duration = QLabel(tr("Duration: 00:00:00"))
-        self._lbl_dropped  = QLabel(tr("Dropped: 0"))
+        self._lbl_packets  = QLabel("Пакетов: 0")
+        self._lbl_unique   = QLabel("Уникальных: 0")
+        self._lbl_duration = QLabel("Длительность: 00:00:00")
+        self._lbl_dropped  = QLabel("Потеряно (Arduino): 0")
 
         for lbl in (self._lbl_packets, self._lbl_unique,
                     self._lbl_duration, self._lbl_dropped):
+            layout.addWidget(lbl)
+
+        return grp
+
+    def _build_diag_group(self) -> QGroupBox:
+        grp = QGroupBox("Диагностика")
+        layout = QVBoxLayout(grp)
+
+        self._lbl_edges_ps  = QLabel("Фронтов/с: —")
+        self._lbl_pkts_ps   = QLabel("Пакетов/с: —")
+        self._lbl_raw_lines = QLabel("Строк Serial: 0")
+        self._lbl_buf_size  = QLabel("Буфер фронтов: 0")
+
+        for lbl in (self._lbl_edges_ps, self._lbl_pkts_ps,
+                    self._lbl_raw_lines, self._lbl_buf_size):
             layout.addWidget(lbl)
 
         return grp
@@ -199,74 +246,58 @@ class MainWindow(QMainWindow):
         mb = self.menuBar()
         mb.clear()
 
-        # File menu
         self._menu_file = mb.addMenu(tr("File"))
-        self._act_save   = self._menu_file.addAction(tr("Save Session"), self._save_session)
-        self._act_csv    = self._menu_file.addAction(tr("Export CSV…"),  self._export_csv)
+        self._menu_file.addAction(tr("Save Session"), self._save_session)
+        self._menu_file.addAction(tr("Export CSV…"),  self._export_csv)
         self._menu_file.addSeparator()
-        self._act_quit   = self._menu_file.addAction(tr("Quit"), self.close)
+        self._menu_file.addAction(tr("Quit"), self.close)
 
-        # Capture menu
         self._menu_capture = mb.addMenu(tr("Capture"))
-        self._act_reset  = self._menu_capture.addAction(tr("Reset Statistics"), self._reset_stats)
-        self._act_rawcap = self._menu_capture.addAction(tr("Start Raw Capture"), self._start_raw_capture)
-        self._act_stop   = self._menu_capture.addAction(tr("Stop Capture"), self._stop_capture)
+        self._menu_capture.addAction(tr("Reset Statistics"),  self._reset_stats)
+        self._menu_capture.addAction(tr("Start Raw Capture"), self._start_raw_capture)
+        self._menu_capture.addAction(tr("Stop Capture"),      self._stop_capture)
 
-        # Language menu
         self._menu_lang = mb.addMenu(tr("Language"))
         for code, name in LANGUAGES.items():
-            action = self._menu_lang.addAction(name)
-            action.setData(code)
-            action.triggered.connect(lambda checked=False, c=code: self._change_language(c))
+            act = self._menu_lang.addAction(name)
+            act.triggered.connect(lambda checked=False, c=code: set_language(c))
+
+        self._menu_help = mb.addMenu("О программе")
+        self._menu_help.addAction(
+            f"{APP_NAME} v{VERSION}",
+            self._show_about,
+        )
 
     # ================================================================ #
-    # Retranslation (live language switch)                               #
+    # Retranslation                                                      #
     # ================================================================ #
 
     def _retranslate_ui(self, _lang: str = "") -> None:
-        self.setWindowTitle(tr("PIKO SmartControl Protocol Analyzer"))
-
-        # Serial group
+        self.setWindowTitle(f"{tr('PIKO SmartControl Protocol Analyzer')} v{VERSION}")
         self._grp_serial.setTitle(tr("Serial"))
         self._lbl_port.setText(tr("Port:"))
         self._lbl_baud.setText(tr("Baud:"))
         self._btn_connect.setText(tr("Connect"))
         self._btn_disconnect.setText(tr("Disconnect"))
-
-        # Stats group
         self._grp_stats.setTitle(tr("Statistics"))
         self._grp_actions.setTitle(tr("Quick Actions"))
         self._btn_raw_cap.setText(tr("Start Raw Capture"))
         self._btn_reset.setText(tr("Reset Statistics"))
-
-        # Static stat labels (dynamic ones are updated in _refresh_ui)
-        self._lbl_dropped.setText(tr("Dropped: 0"))
-
-        # Tabs
         self._tabs.setTabText(0, tr("Byte Analysis"))
         self._tabs.setTabText(1, tr("Bit Analysis"))
         self._tabs.setTabText(2, tr("Actions"))
         self._tabs.setTabText(3, tr("Charts"))
         self._tabs.setTabText(4, tr("Checksum"))
-
-        # Checksum tab button
         self._btn_run_cs.setText(tr("Run Checksum Analysis"))
-
-        # Rebuild menu with new language
         self._build_menu()
-
-        # Forward to child widgets
         self._packet_table.retranslate_ui()
         self._byte_view.retranslate_ui()
         self._bit_view.retranslate_ui()
         self._action_view.retranslate_ui()
         self._charts_view.retranslate_ui()
 
-    def _change_language(self, code: str) -> None:
-        set_language(code)   # fires on_language_changed callbacks
-
     # ================================================================ #
-    # Timer & refresh                                                    #
+    # Refresh timer                                                      #
     # ================================================================ #
 
     def _setup_refresh_timer(self) -> None:
@@ -276,34 +307,54 @@ class MainWindow(QMainWindow):
         self._refresh_timer.start()
 
     def _refresh_ui(self) -> None:
-        total   = self._packet_stats.total_count
-        unique  = self._packet_stats.unique_count
-        records = self._packet_stats.records_by_count()
+        try:
+            self._refresh_stats()
+            self._refresh_analysis()
+            self._refresh_diag()
+            self._action_view.refresh()
+        except Exception as exc:
+            log.error(f"GUI refresh error: {exc}", exc_info=True)
+
+    def _refresh_stats(self) -> None:
+        total  = self._packet_stats.total_count
+        unique = self._packet_stats.unique_count
 
         if self._capture_start > 0:
             elapsed = time.monotonic() - self._capture_start
             h = int(elapsed // 3600)
             m = int((elapsed % 3600) // 60)
             s = int(elapsed % 60)
-            self._lbl_duration.setText(
-                tr("Duration: {h}:{m}:{s}",
-                   h=f"{h:02d}", m=f"{m:02d}", s=f"{s:02d}")
-            )
+            self._lbl_duration.setText(f"Длительность: {h:02d}:{m:02d}:{s:02d}")
 
-        self._lbl_packets.setText(tr("Packets: {total}", total=f"{total:,}"))
-        self._lbl_unique.setText(tr("Unique: {unique}",  unique=f"{unique:,}"))
+        self._lbl_packets.setText(f"Пакетов: {total:,}")
+        self._lbl_unique.setText(f"Уникальных: {unique:,}")
+        self._packet_table.update_records(
+            self._packet_stats.records_by_count(), total
+        )
 
-        self._packet_table.update_records(records, total)
-
+    def _refresh_analysis(self) -> None:
+        records  = self._packet_stats.records_by_count()
         weighted = [(r.data, r.count) for r in records]
-        if weighted:
+        if not weighted:
+            return
+        try:
             byte_stats = compute_byte_stats(weighted)
             bit_stats  = compute_bit_stats(weighted)
             self._byte_view.update_stats(byte_stats)
             self._bit_view.update_stats(bit_stats)
             self._charts_view.update_data(records, byte_stats, self._ordered_pkts)
+        except Exception as exc:
+            log.error(f"Ошибка анализа: {exc}", exc_info=True)
 
-        self._action_view.refresh()
+    def _refresh_diag(self) -> None:
+        rate_e = int(self._edges_per_tick / (config.GUI_REFRESH_MS / 1000))
+        rate_p = int(self._pkts_per_tick  / (config.GUI_REFRESH_MS / 1000))
+        self._lbl_edges_ps.setText(f"Фронтов/с: {rate_e:,}")
+        self._lbl_pkts_ps.setText(f"Пакетов/с: {rate_p:,}")
+        self._lbl_raw_lines.setText(f"Строк Serial: {self._raw_lines_total:,}")
+        self._lbl_buf_size.setText(f"Буфер фронтов: {len(self._edge_buf):,}")
+        self._edges_per_tick = 0
+        self._pkts_per_tick  = 0
 
     # ================================================================ #
     # Serial connection                                                  #
@@ -312,28 +363,57 @@ class MainWindow(QMainWindow):
     def _refresh_ports(self) -> None:
         current = self._port_combo.currentText()
         self._port_combo.clear()
-        for p in list_ports():
-            self._port_combo.addItem(p)
-        idx = self._port_combo.findText(current)
-        if idx >= 0:
-            self._port_combo.setCurrentIndex(idx)
+        ports = list_ports()
+        if not ports:
+            log.warning("Последовательные порты не найдены")
+            self._port_combo.addItem("— нет портов —")
+        else:
+            for p in ports:
+                self._port_combo.addItem(p)
+            idx = self._port_combo.findText(current)
+            if idx >= 0:
+                self._port_combo.setCurrentIndex(idx)
 
     def _connect(self) -> None:
         port     = self._port_combo.currentText()
-        baudrate = int(self._baud_combo.currentText())
-        if not port:
-            QMessageBox.warning(self, tr("No port"), tr("Please select a serial port."))
+        baudrate_str = self._baud_combo.currentText()
+
+        if not port or port.startswith("—"):
+            QMessageBox.warning(self, "Нет порта",
+                                "Выберите последовательный порт из списка.\n"
+                                "Нажмите ↺ для обновления списка портов.")
+            log.warning("Connect нажат без выбранного порта")
             return
-        self._serial_thread = SerialThread(port, baudrate, parent=self)
-        self._serial_thread.edge_received.connect(self._on_edge)
-        self._serial_thread.packet_received.connect(self._on_pkt_line)
-        self._serial_thread.stat_received.connect(self._on_stat)
-        self._serial_thread.connected.connect(self._on_connected)
-        self._serial_thread.disconnected.connect(self._on_disconnected)
-        self._serial_thread.status_message.connect(self._on_status_msg)
-        self._serial_thread.start()
+
+        try:
+            baudrate = int(baudrate_str)
+        except ValueError:
+            QMessageBox.critical(self, "Ошибка", f"Неверная скорость: {baudrate_str!r}")
+            return
+
+        log.info(f"Подключение к {port!r} @ {baudrate} baud...")
+        self._set_status(f"Подключение к {port}…")
+        self._btn_connect.setEnabled(False)
+
+        try:
+            self._serial_thread = SerialThread(port, baudrate, parent=self)
+            self._serial_thread.edge_received.connect(self._on_edge)
+            self._serial_thread.packet_received.connect(self._on_pkt_line)
+            self._serial_thread.stat_received.connect(self._on_stat)
+            self._serial_thread.connected.connect(self._on_connected)
+            self._serial_thread.disconnected.connect(self._on_disconnected)
+            self._serial_thread.status_message.connect(self._on_status_msg)
+            self._serial_thread.raw_line.connect(self._on_raw_line)
+            self._serial_thread.start()
+            log.debug("SerialThread.start() вызван")
+        except Exception as exc:
+            log.error(f"Не удалось запустить SerialThread: {exc}", exc_info=True)
+            QMessageBox.critical(self, "Ошибка подключения", str(exc))
+            self._btn_connect.setEnabled(True)
+            self._serial_thread = None
 
     def _disconnect(self) -> None:
+        log.info("Отключение по запросу пользователя")
         if self._serial_thread:
             self._edge_accum.flush_now()
             self._serial_thread.stop()
@@ -348,23 +428,49 @@ class MainWindow(QMainWindow):
         self._btn_connect.setEnabled(False)
         self._btn_disconnect.setEnabled(True)
         self._capture_start = time.monotonic()
-        self.statusBar().showMessage(tr("Connected: {port}", port=port))
+        self._lbl_conn_state.setText("⬤ Подключено")
+        self._lbl_conn_state.setStyleSheet("color: #44cc44; font-weight: bold;")
+        self._set_status(f"Подключено: {port}")
+        log.info(f"Успешно подключено: {port}")
 
     @Slot(str)
     def _on_disconnected(self, reason: str) -> None:
         self._btn_connect.setEnabled(True)
         self._btn_disconnect.setEnabled(False)
         self._capture_start = 0.0
-        self.statusBar().showMessage(tr("Disconnected: {reason}", reason=reason))
+        self._lbl_conn_state.setText("⬤ Отключено")
+        self._lbl_conn_state.setStyleSheet("color: #cc4444;")
+        self._set_status(f"Отключено: {reason}")
+        log.warning(f"Отключено: {reason}")
+
+        if self._serial_thread:
+            self._serial_thread = None
+
+        # Show dialog for unexpected disconnects (not user-initiated)
+        if reason and "stop" not in reason.lower():
+            QMessageBox.warning(
+                self, "Соединение потеряно",
+                f"Соединение с портом прервано:\n\n{reason}\n\n"
+                f"Проверьте USB-кабель и Arduino.\n"
+                f"Подробности в вкладке «Лог»."
+            )
 
     @Slot(str)
     def _on_status_msg(self, msg: str) -> None:
-        self.statusBar().showMessage(msg, 3000)
+        self._set_status(msg, timeout=4000)
+
+    @Slot(str)
+    def _on_raw_line(self, line: str) -> None:
+        self._raw_lines_total += 1
 
     @Slot(RawEdge)
     def _on_edge(self, edge: RawEdge) -> None:
+        self._edges_per_tick += 1
         self._edge_buf.append(edge)
-        self._edge_accum.feed(edge)
+        try:
+            self._edge_accum.feed(edge)
+        except Exception as exc:
+            log.error(f"EdgeAccumulator.feed() error: {exc}", exc_info=True)
 
     @Slot(int, bytes)
     def _on_pkt_line(self, timestamp_us: int, data: bytes) -> None:
@@ -372,19 +478,21 @@ class MainWindow(QMainWindow):
 
     @Slot(int, int)
     def _on_stat(self, rx: int, dropped: int) -> None:
-        self._lbl_dropped.setText(
-            tr("Dropped (Arduino): {dropped}", dropped=f"{dropped:,}")
-        )
+        self._lbl_dropped.setText(f"Потеряно (Arduino): {dropped:,}")
 
-    def _on_parsed_packet(self, timestamp_us: int, data: bytes, raw_edges: list) -> None:
+    def _on_parsed_packet(self, timestamp_us: int, data: bytes, _edges: list) -> None:
         if not data:
             return
-        self._packet_stats.add_packet(timestamp_us, data)
-        self._transitions.feed_packet(data)
-        self._action_rec.feed_packet(data)
-        self._ordered_pkts.append(data)
-        if len(self._ordered_pkts) > config.LIVE_RING_SIZE:
-            self._ordered_pkts = self._ordered_pkts[-config.LIVE_RING_SIZE:]
+        try:
+            self._pkts_per_tick += 1
+            self._packet_stats.add_packet(timestamp_us, data)
+            self._transitions.feed_packet(data)
+            self._action_rec.feed_packet(data)
+            self._ordered_pkts.append(data)
+            if len(self._ordered_pkts) > config.LIVE_RING_SIZE:
+                self._ordered_pkts = self._ordered_pkts[-config.LIVE_RING_SIZE:]
+        except Exception as exc:
+            log.error(f"Ошибка обработки пакета: {exc}", exc_info=True)
 
     # ================================================================ #
     # Capture controls                                                   #
@@ -394,22 +502,26 @@ class MainWindow(QMainWindow):
         if self._serial_thread:
             self._serial_thread.send_command("RAW")
         self._capture_start = time.monotonic()
-        self.statusBar().showMessage(tr("Raw capture started"))
+        self._set_status("Захват запущен")
+        log.info("Raw capture запущен")
 
     def _stop_capture(self) -> None:
         if self._serial_thread:
             self._serial_thread.send_command("STOP")
             self._edge_accum.flush_now()
-        self.statusBar().showMessage(tr("Capture stopped"))
+        self._set_status("Захват остановлен")
+        log.info("Захват остановлен")
 
     def _reset_stats(self) -> None:
         self._packet_stats.reset()
         self._transitions.reset()
         self._ordered_pkts.clear()
         self._edge_buf.clear()
+        self._raw_lines_total = 0
         if self._serial_thread:
             self._serial_thread.send_command("RST")
-        self.statusBar().showMessage(tr("Statistics reset"))
+        self._set_status("Статистика сброшена")
+        log.info("Статистика сброшена")
 
     # ================================================================ #
     # Checksum                                                           #
@@ -420,14 +532,21 @@ class MainWindow(QMainWindow):
         weighted = [(r.data, r.count) for r in records]
         if not weighted:
             self._checksum_label.setText(tr("No packets captured yet."))
+            log.info("Checksum: нет пакетов")
             return
 
-        candidates = find_checksum_candidates(
-            weighted,
-            algorithms=config.CHECKSUM_ALGORITHMS,
-            min_match_pct=50.0,
-        )
+        log.info(f"Checksum analysis: {len(weighted)} уникальных пакетов…")
+        try:
+            candidates = find_checksum_candidates(
+                weighted, algorithms=config.CHECKSUM_ALGORITHMS, min_match_pct=50.0
+            )
+        except Exception as exc:
+            log.error(f"Checksum analysis failed: {exc}", exc_info=True)
+            self._checksum_label.setText(f"Ошибка анализа: {exc}")
+            return
+
         self._checksum_cache = candidates
+        log.info(f"Checksum: найдено {len(candidates)} кандидатов")
 
         if not candidates:
             self._checksum_label.setText(
@@ -436,17 +555,12 @@ class MainWindow(QMainWindow):
             return
 
         lines = [
-            tr("<b>Checksum Candidates</b><br>"),
-            "<table>",
-            f"<tr><th>{tr('Algorithm')}</th>"
-            f"<th>{tr('Byte pos')}</th>"
-            f"<th>{tr('Match %')}</th></tr>",
+            tr("<b>Checksum Candidates</b><br>"), "<table>",
+            f"<tr><th>{tr('Algorithm')}</th><th>{tr('Byte pos')}</th><th>{tr('Match %')}</th></tr>",
         ]
         for c in candidates[:20]:
             lines.append(
-                f"<tr><td>{c.algorithm}</td>"
-                f"<td>{c.byte_position}</td>"
-                f"<td>{c.match_pct:.1f}%</td></tr>"
+                f"<tr><td>{c.algorithm}</td><td>{c.byte_position}</td><td>{c.match_pct:.1f}%</td></tr>"
             )
         lines.append("</table>")
         self._checksum_label.setText("\n".join(lines))
@@ -456,36 +570,76 @@ class MainWindow(QMainWindow):
     # ================================================================ #
 
     def _save_session(self) -> None:
-        records    = self._packet_stats.records_by_count()
-        weighted   = [(r.data, r.count) for r in records]
-        byte_stats = compute_byte_stats(weighted)
-        bit_stats  = compute_bit_stats(weighted)
-        if not self._checksum_cache and weighted:
-            self._checksum_cache = find_checksum_candidates(
-                weighted, algorithms=config.CHECKSUM_ALGORITHMS
+        try:
+            records    = self._packet_stats.records_by_count()
+            weighted   = [(r.data, r.count) for r in records]
+            byte_stats = compute_byte_stats(weighted)
+            bit_stats  = compute_bit_stats(weighted)
+            if not self._checksum_cache and weighted:
+                self._checksum_cache = find_checksum_candidates(
+                    weighted, algorithms=config.CHECKSUM_ALGORITHMS
+                )
+            elapsed = (
+                time.monotonic() - self._capture_start
+                if self._capture_start > 0 else 0.0
             )
-        elapsed = (
-            time.monotonic() - self._capture_start
-            if self._capture_start > 0 else 0.0
-        )
-        path = self._session_mgr.save(
-            packet_stats        = self._packet_stats,
-            byte_stats          = byte_stats,
-            bit_stats           = bit_stats,
-            transition_tracker  = self._transitions,
-            action_recorder     = self._action_rec,
-            checksum_candidates = self._checksum_cache,
-            port                = self._port_combo.currentText(),
-            duration_s          = elapsed,
-        )
-        QMessageBox.information(self, tr("Session saved"),
-                                tr("Saved to:\n{path}", path=path))
+            path = self._session_mgr.save(
+                packet_stats        = self._packet_stats,
+                byte_stats          = byte_stats,
+                bit_stats           = bit_stats,
+                transition_tracker  = self._transitions,
+                action_recorder     = self._action_rec,
+                checksum_candidates = self._checksum_cache,
+                port                = self._port_combo.currentText(),
+                duration_s          = elapsed,
+            )
+            log.info(f"Сессия сохранена: {path}")
+            QMessageBox.information(self, "Сессия сохранена", f"Сохранено:\n{path}")
+        except Exception as exc:
+            log.error(f"Ошибка сохранения сессии: {exc}", exc_info=True)
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить сессию:\n{exc}")
 
     def _export_csv(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
-            self, tr("Export CSV…"), "", "CSV files (*.csv)"
+            self, "Экспорт CSV", "", "CSV files (*.csv)"
         )
-        if path:
+        if not path:
+            return
+        try:
             self._session_mgr.export_csv(self._packet_stats, path)
-            QMessageBox.information(self, tr("Exported"),
-                                    tr("Exported to:\n{path}", path=path))
+            log.info(f"CSV экспортирован: {path}")
+            QMessageBox.information(self, "Готово", f"Сохранено:\n{path}")
+        except Exception as exc:
+            log.error(f"Ошибка экспорта CSV: {exc}", exc_info=True)
+            QMessageBox.critical(self, "Ошибка", f"Не удалось экспортировать:\n{exc}")
+
+    # ================================================================ #
+    # Helpers                                                            #
+    # ================================================================ #
+
+    def _set_status(self, msg: str, timeout: int = 0, permanent: str = "") -> None:
+        if timeout:
+            self.statusBar().showMessage(msg, timeout)
+        else:
+            self.statusBar().showMessage(msg)
+        if permanent:
+            self._status_perm.setText(permanent)
+
+    def _show_about(self) -> None:
+        QMessageBox.about(
+            self, f"О программе",
+            f"<b>{APP_NAME}</b><br>"
+            f"Версия: {VERSION}<br>"
+            f"Автор: {AUTHOR}<br><br>"
+            f"Инструмент для реверс-инжиниринга протокола PIKO SmartControl.<br>"
+            f"Лицензия: MIT<br><br>"
+            f"<a href='{REPO}'>{REPO}</a>"
+        )
+
+    def closeEvent(self, event) -> None:
+        log.info("Завершение работы…")
+        if self._serial_thread:
+            self._edge_accum.flush_now()
+            self._serial_thread.stop()
+        log.info("До свидания.")
+        event.accept()

@@ -13,21 +13,33 @@ if _ROOT not in sys.path:
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore    import Qt
 
-from analyzer.gui.main_window import MainWindow
+from analyzer.logger   import get_logger
+from analyzer.version  import APP_NAME, VERSION, version_string
+
+log = get_logger(__name__)
 
 
 def main() -> None:
-    # High-DPI scaling is automatic in Qt6; the old attribute is deprecated.
+    log.info(f"=== {version_string()} ===")
+    log.info(f"Python {sys.version}")
+    log.info(f"Platform: {sys.platform}")
+    log.info(f"CWD: {os.getcwd()}")
+
     QApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
     app = QApplication(sys.argv)
-    app.setApplicationName("PIKO SmartControl Protocol Analyzer")
+    app.setApplicationName(APP_NAME)
+    app.setApplicationVersion(VERSION)
 
+    from analyzer.gui.main_window import MainWindow
     window = MainWindow()
     window.show()
 
-    sys.exit(app.exec())
+    log.info("GUI запущен, входим в event loop")
+    code = app.exec()
+    log.info(f"Приложение завершено, exit code={code}")
+    sys.exit(code)
 
 
 if __name__ == "__main__":
