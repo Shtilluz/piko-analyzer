@@ -34,6 +34,8 @@ from analyzer.gui.bit_analysis_view import BitAnalysisWidget
 from analyzer.gui.action_view       import ActionWidget
 from analyzer.gui.charts            import ChartsWidget
 from analyzer.gui.log_view          import LogViewWidget
+from analyzer.gui.sketch_generator  import SketchGeneratorWidget
+from analyzer.gui.help_view         import HelpViewWidget
 
 log = get_logger(__name__)
 
@@ -116,11 +118,13 @@ class MainWindow(QMainWindow):
         self._tabs = QTabWidget()
         right_layout.addWidget(self._tabs, 3)
 
-        self._byte_view   = ByteAnalysisWidget()
-        self._bit_view    = BitAnalysisWidget()
-        self._action_view = ActionWidget(self._action_rec)
-        self._charts_view = ChartsWidget()
-        self._log_view    = LogViewWidget()
+        self._byte_view    = ByteAnalysisWidget()
+        self._bit_view     = BitAnalysisWidget()
+        self._action_view  = ActionWidget(self._action_rec)
+        self._charts_view  = ChartsWidget()
+        self._sketch_view  = SketchGeneratorWidget()
+        self._help_view    = HelpViewWidget()
+        self._log_view     = LogViewWidget()
 
         self._tabs.addTab(self._byte_view,   tr("Byte Analysis"))
         self._tabs.addTab(self._bit_view,    tr("Bit Analysis"))
@@ -149,7 +153,13 @@ class MainWindow(QMainWindow):
         cs_layout.addStretch()
         self._tabs.addTab(cs_wrapper, tr("Checksum"))
 
-        # Log tab — always visible, shows all events
+        # Sketch generator tab
+        self._tabs.addTab(self._sketch_view, tr("Sketch Generator"))
+
+        # Help / Instructions tab
+        self._tabs.addTab(self._help_view, tr("Instructions"))
+
+        # Log tab — always last, shows all events
         self._tabs.addTab(self._log_view, "Лог")
 
         # Tooltips for tabs
@@ -176,6 +186,15 @@ class MainWindow(QMainWindow):
             "Нажмите кнопку после накопления пакетов."
         )
         self._tabs.setTabToolTip(5,
+            "Генератор готового Arduino .ino скетча.\n"
+            "Заполните найденную структуру пакета (адрес, байт скорости,\n"
+            "бит направления, функции, КС) и нажмите «Сгенерировать»."
+        )
+        self._tabs.setTabToolTip(6,
+            "Встроенная инструкция: схема подключения, порядок работы,\n"
+            "интерпретация результатов, устранение неполадок."
+        )
+        self._tabs.setTabToolTip(7,
             "Журнал всех событий приложения в реальном времени.\n"
             "Цвета: серый=DEBUG, белый=INFO, оранжевый=WARNING, красный=ERROR.\n"
             "Здесь видны ошибки подключения, проблемы парсинга и прочая диагностика."
@@ -391,6 +410,8 @@ class MainWindow(QMainWindow):
         self._tabs.setTabText(2, tr("Actions"))
         self._tabs.setTabText(3, tr("Charts"))
         self._tabs.setTabText(4, tr("Checksum"))
+        self._tabs.setTabText(5, tr("Sketch Generator"))
+        self._tabs.setTabText(6, tr("Instructions"))
         self._btn_run_cs.setText(tr("Run Checksum Analysis"))
         self._build_menu()
         self._packet_table.retranslate_ui()
@@ -398,6 +419,7 @@ class MainWindow(QMainWindow):
         self._bit_view.retranslate_ui()
         self._action_view.retranslate_ui()
         self._charts_view.retranslate_ui()
+        self._sketch_view.retranslate_ui()
 
     # ================================================================ #
     # Refresh timer                                                      #

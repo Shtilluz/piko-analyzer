@@ -214,6 +214,34 @@ _RU: dict[str, str] = {
     "Algorithm":   "Алгоритм",
     "Byte pos":    "Позиция байта",
     "Match %":     "Совпадений %",
+
+    # ---- Tabs (new) ----
+    "Sketch Generator": "Генератор скетча",
+    "Instructions":     "Инструкция",
+
+    # ---- Sketch generator ----
+    "Packet":                    "Пакет",
+    "Packet length (bytes):":    "Длина пакета (байт):",
+    "Decoder Address":           "Адрес декодера",
+    "Byte position:":            "Позиция байта:",
+    "Value (hex):":              "Значение (hex):",
+    "Speed":                     "Скорость",
+    "Bitmask (hex):":            "Маска битов (hex):",
+    "Max value:":                "Макс. значение:",
+    "Direction":                 "Направление",
+    "Bit number (0=LSB):":       "Номер бита (0=LSB):",
+    "Bit=1 means Forward:":      "Бит=1 означает «Вперёд»:",
+    "Checksum":                  "Контрольная сумма",
+    "Algorithm:":                "Алгоритм:",
+    "Functions (F0–F7+)":        "Функции (F0–F7+)",
+    "Byte pos":                  "Байт",
+    "Bit":                       "Бит",
+    "Enabled":                   "Вкл",
+    "Generate Sketch":           "Сгенерировать скетч",
+    "Generated Arduino sketch:": "Сгенерированный Arduino скетч:",
+    "Copy":                      "Копировать",
+    "Save .ino":                 "Сохранить .ino",
+    "Save .ino":                 "Сохранить .ino",
 }
 
 _TRANSLATIONS: dict[str, dict[str, str]] = {
